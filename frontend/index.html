@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="vi">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Factory Safety Dashboard</title>
+    <link rel="stylesheet" href="Assets/css/style.css">
+</head>
+
+<body>
+
+    <div class="camera-section">
+        <div class="camera-header">
+            <div class="container">
+                <div class="card">
+                    <h2>Nhiệt độ</h2>
+                    <div class="value" id="temperature">-- °C</div>
+                </div>
+
+                <div class="card">
+                    <h2>Độ ẩm</h2>
+                    <div class="value" id="humidity">-- %</div>
+                </div>
+
+                <div class="card">
+                    <h2>Khí Gas</h2>
+                    <div class="value" id="gas">--</div>
+                </div>
+
+                <div class="card card-controls">
+                    <button id="relayBtn" class="btn-relay">TOGGLE RELAY</button>
+                    <button id="alertBtn">ALERT</button>
+                </div>
+            </div>
+
+            <h1 class="dashboard-title">FACTORY SAFETY SYSTEM</h1>
+
+            <div class="camera-controls">
+                <div class="card system-reason-card">
+                    <h2>Lý do cảnh báo</h2>
+                    <div class="value reason-text" id="alertReason">Đang cập nhật...</div>
+                </div>
+
+                <button id="darkModeToggle" class="mode-toggle-btn">🌙</button>
+                
+                <div class="notification-wrapper">
+                    <div id="notificationBell">🔔</div>
+                    <span id="notificationCount">0</span>
+
+                    <div id="notificationDropdown">
+                        <h3>Thông báo mới nhất</h3>
+                        <div id="notificationList"></div>
+                        <div class="view-more">Xem thêm</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="camera-view">
+            <img id="cameraFeed" class="python-stream-view" src="http://localhost:3000/api/video-feed" alt="Đang kết nối luồng xử lý từ Python AI...">
+        </div>
+    </div>
+
+    <div class="updated">
+        <div class="update-time-text">
+            Last Update: <span id="updatedAt">--</span>
+        </div>
+        
+        <div class="connection-status">
+            <div class="status-item">
+                <span id="statusBackend" class="dot dot-red"></span>
+                <span class="status-label">Backend</span>
+            </div>
+            <div class="status-item">
+                <span id="statusPython" class="dot dot-red"></span>
+                <span class="status-label">Python AI</span>
+            </div>
+            <div class="status-item">
+                <span id="statusEsp32" class="dot dot-red"></span>
+                <span class="status-label">ESP32</span>
+            </div>
+        </div>
+    </div>
+
+    <div id="imageModal">
+        <div class="modal-content">
+            <span id="closeModalBtn">&times;</span>
+            <h3 class="modal-title">Chi tiết hình ảnh xâm nhập vùng cấm</h3>
+            
+            <div class="modal-body">
+                <div class="full-image-container">
+                    <p>Ảnh toàn cảnh (Gốc)</p>
+                    <img id="modalFullImage" src="" alt="Không có dữ liệu ảnh toàn cảnh">
+                </div>
+                <div id="cropImageContainer" class="crop-container">
+                    <p>Đối tượng</p>
+                    <img id="modalCropImage" src="" alt="Không có ảnh cắt">
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+    <script src="Assets/js/app.js"></script>
+
+</body>
+</html>

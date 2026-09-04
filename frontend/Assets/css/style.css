@@ -1,0 +1,415 @@
+:root {
+    --bg-body: #f4f4f4;
+    --bg-card: #ffffff;
+    --text-main: #111111;
+    --text-sub: #444444;
+    --text-muted: #555555;
+    --shadow: rgba(0,0,0,0.1);
+    --border-color: #ddd;
+    --dropdown-bg: #f9f9f9;
+}
+
+body.dark-mode {
+    --bg-body: #121212;
+    --bg-card: #1e1e1e;
+    --text-main: #e0e0e0;
+    --text-sub: #b0b0b0;
+    --text-muted: #888888;
+    --shadow: rgba(0, 0, 0, 0.5);
+    --border-color: #333333;
+    --dropdown-bg: #242424;
+}
+
+*{
+    margin:0;
+    padding:0;
+    box-sizing:border-box;
+}
+
+body{
+    font-family:Arial, sans-serif;
+    background: var(--bg-body);
+    color: var(--text-main);
+    padding:12px;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    transition: background 0.3s, color 0.3s;
+}
+
+.camera-section{
+    background: var(--bg-card);
+    padding:12px;
+    border-radius:12px;
+    box-shadow:0 2px 8px var(--shadow);
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+
+.camera-header{
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    gap:12px;
+    margin-bottom:10px;
+    flex-shrink: 0;  
+    position: relative;
+}
+
+.container{
+    display:flex;
+    gap:12px;
+}
+
+.card{
+    background: var(--bg-card);
+    padding:12px;
+    border-radius:10px;
+    width:135px;
+    min-height:75px;
+    box-shadow:0 2px 8px var(--shadow);
+}
+
+/* ĐỊNH DẠNG Ô CHỨA 2 NÚT ĐIỀU KHIỂN (2 DÒNG) BÊN PHẢI KHÍ GAS */
+.card-controls {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    gap: 6px;
+    padding: 8px; /* Thu nhỏ padding để tăng không gian cho nút bấm */
+    width: 150px;  /* Tăng nhẹ chiều rộng để chữ nút không bị tràn dòng */
+}
+
+.card-controls button {
+    width: 100%;
+    flex: 1; /* Cho phép 2 nút chia đều chiều cao của ô */
+    padding: 0 10px; /* Bỏ padding top/bottom vì flex đã tự co giãn */
+    border: none;
+    border-radius: 6px;
+    font-size: 13px; /* Thu nhỏ font một chút để vừa vặn cấu trúc 2 dòng */
+    font-weight: bold;
+    cursor: pointer;
+    transition: 0.3s;
+}
+
+.system-reason-card {
+    width: auto;
+    max-width: 280px;
+    min-width: 180px;
+    margin-right: 10px;
+    text-align: left;
+}
+
+.card h2{
+    font-size:16px;
+    margin-bottom:8px;
+    color: var(--text-sub);
+}
+
+.value{
+    font-size:28px;
+    font-weight:bold;
+    color: var(--text-main);
+}
+
+.reason-text {
+    font-size: 14px;
+    line-height: 1.3;
+    word-break: break-word;
+}
+
+.safe{ color:green; }
+.warning{ color:red; }
+
+.dashboard-title{
+    font-size:30px;
+    font-weight:bold;
+    letter-spacing:2px;
+    color: var(--text-main);
+    white-space:nowrap;
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    margin: 0;
+    z-index: 1;
+}
+
+.camera-controls{
+    display:flex;
+    gap:10px;
+    align-items:center;
+}
+
+.mode-toggle-btn {
+    background: none; 
+    border: none; 
+    font-size: 22px; 
+    cursor: pointer; 
+    padding: 5px; 
+    order: 1;
+}
+
+.camera-controls select{
+    padding:12px 15px;
+    border:none;
+    border-radius:10px;
+    background: var(--bg-body);
+    color: var(--text-main);
+    font-size:16px;
+    cursor:pointer;
+}
+
+#alertBtn{
+    background:#e74c3c;
+    color:white;
+}
+
+#alertBtn:hover{ background:#c0392b; }
+
+.btn-relay {
+    background: #27ae60;
+    color: white;
+}
+
+.camera-view{
+    width:100%;
+    overflow:hidden;
+    border-radius:15px;
+    background:black;
+    flex: 1;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 0;
+}
+
+.python-stream-view {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+}
+
+.updated {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: var(--bg-card);
+    margin-top: 15px;
+    padding: 12px 20px;
+    border-radius: 10px;
+    box-shadow: 0 2px 8px var(--shadow);
+    font-size: 13px;
+    color: var(--text-muted);
+    font-weight: bold;
+}
+
+.notification-wrapper{
+    position: relative;
+    order: 2;
+    margin-right: 15px;
+}
+
+#notificationBell{
+    position: relative;
+    font-size: 22px;
+    cursor: pointer;
+}
+
+#notificationCount{
+    position: absolute;
+    top: -5px;
+    right: -10px;
+    background: red;
+    color: white;
+    font-size: 12px;
+    padding: 2px 6px;
+    border-radius: 50%;
+}
+
+#notificationDropdown{
+    position: absolute;
+    top: 40px;
+    right: 0;
+    width: 300px;
+    background: var(--dropdown-bg);
+    border-radius: 10px;
+    box-shadow: 0 5px 15px var(--shadow);
+    padding: 15px;
+    display: none;
+    z-index: 999;
+}
+
+#notificationDropdown h3{
+    margin-bottom: 10px;
+    color: var(--text-main);
+}
+
+.notification-item{
+    display: flex;
+    gap: 10px;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--border-color);
+    align-items: center; 
+}
+
+.notification-icon{
+    width: 40px;
+    height: 40px;
+    background: #1e5a8a;
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    flex-shrink: 0;      
+    font-size: 18px;     
+}
+
+.notification-text{
+    font-size: 14px;
+    color: var(--text-main);
+    flex: 1;             
+}
+
+#clearAllAlertsBtn {
+    cursor: pointer;
+    text-align: center;
+    margin-top: 15px;
+    padding: 7px;
+    background: #fce8e6;
+    color: #c92a2a;
+    font-weight: bold;
+    border-radius: 6px;
+    border: 1px dashed #f03e3e;
+    font-size: 13px;
+    transition: 0.2s;
+}
+
+#clearAllAlertsBtn:hover {
+    background: #f8d7da;
+    color: #b71c1c;
+}
+
+.view-more{
+    text-align: center;
+    color: purple;
+    margin-top: 10px;
+    cursor: pointer;
+}
+
+#imageModal {
+    display: none; 
+    position: fixed; 
+    z-index: 1000; 
+    left: 0; 
+    top: 0; 
+    width: 100%; 
+    height: 100%; 
+    background-color: rgba(0,0,0,0.8); 
+    align-items: center; 
+    justify-content: center;
+}
+
+.modal-content {
+    background: var(--bg-card); 
+    color: var(--text-main);
+    padding: 25px; 
+    border-radius: 16px; 
+    max-width: 85%; 
+    width: 750px; 
+    text-align: center; 
+    position: relative; 
+    box-shadow: 0 10px 30px rgba(0,0,0,0.6); 
+    animation: fadeIn 0.25s ease-out;
+}
+
+#closeModalBtn {
+    position: absolute; 
+    top: 10px; 
+    right: 20px; 
+    font-size: 32px; 
+    font-weight: bold; 
+    cursor: pointer; 
+    color: #999; 
+    transition: color 0.2s;
+}
+
+#closeModalBtn:hover { color: var(--text-main); }
+
+.modal-title {
+    margin-bottom: 20px; 
+    color: var(--text-main); 
+    font-family: Arial, sans-serif; 
+    font-size: 20px; 
+    border-bottom: 2px solid var(--border-color); 
+    padding-bottom: 10px;
+}
+
+.modal-body {
+    display: flex; 
+    gap: 20px; 
+    justify-content: center; 
+    align-items: flex-start; 
+    margin-top: 15px;
+}
+
+.full-image-container { flex: 1; }
+
+.full-image-container p, .crop-container p {
+    font-weight: bold; 
+    margin-bottom: 8px; 
+    font-size: 14px;
+}
+
+.full-image-container p { color: var(--text-sub); }
+.crop-container { width: 240px; flex-shrink: 0; }
+.crop-container p { color: #d9534f; }
+
+.modal-body img {
+    width: 100%; 
+    max-height: 380px; 
+    object-fit: contain; 
+    border: 1px solid var(--border-color); 
+    border-radius: 8px; 
+    background: var(--bg-body);
+}
+
+.hide-crop-box { display: none !important; }
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: scale(0.95); }
+    to { opacity: 1; transform: scale(1); }
+}
+
+.connection-status { display: flex; gap: 18px; }
+.status-item { display: flex; align-items: center; gap: 6px; }
+.status-label { font-size: 12px; font-weight: bold; color: var(--text-muted); }
+
+.dot {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    display: inline-block;
+    transition: background-color 0.3s, box-shadow 0.3s;
+}
+
+.dot-red {
+    background-color: #e74c3c;
+    box-shadow: 0 0 4px #e74c3c;
+}
+
+.dot-green {
+    background-color: #2ecc71;
+    box-shadow: 0 0 6px #2ecc71;
+    animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+    0% { box-shadow: 0 0 3px #2ecc71; }
+    50% { box-shadow: 0 0 10px #2ecc71; }
+    100% { box-shadow: 0 0 3px #2ecc71; }
+}
