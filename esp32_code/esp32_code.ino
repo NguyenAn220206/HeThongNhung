@@ -3,498 +3,331 @@
 #include <DHT.h>
 #include <ArduinoJson.h>
 
-// =========================
-// WIFI
-// =========================
-const char* ssid = "Aruba";
-const char* password = "123456789";
+// ======================================================
+// WIFI / BACKEND
+// ======================================================
+const char* ssid = "F87 Phong Lanh 2.4hz";
+const char* password = "68686868";
 
-// =========================
-// SERVER
-// =========================
-const char* serverName = "http://172.20.10.6:3000/api/data";
+const char* serverName = "http://192.168.1.20:3000/api/data";
+const char* buzzerStatusUrl = "http://192.168.1.20:3000/api/buzzer/status";
+const char* buzzerResetUrl = "http://192.168.1.20:3000/api/buzzer/reset";
 
-const char* buzzerStatusUrl =
-    "http://172.20.10.6:3000/api/buzzer/status";
-
-const char* buzzerResetUrl =
-    "http://172.20.10.6:3000/api/buzzer/reset";
-
-// =========================
-// GPIO
-// =========================
+// ======================================================
+// GPIO - KHỚP VỚI SƠ ĐỒ PROTEUS
+// ======================================================
 #define DHT_PIN             4
-#define RELAY_FAN_TRANN     5
-#define RELAY_THONG_GIO     19
+#define MQ2_PIN             34       // ADC input-only
 #define BUZZER_PIN          18
-#define MQ2_PIN             34
+#define RELAY_THONG_GIO    19       // Relay RL2, active LOW
+
+// L298: ENA dùng PWM, IN1/IN2 chọn chiều quay
+#define FAN_PWM_PIN         25       // ENA
+#define FAN_IN1_PIN         26       // IN1
+#define FAN_IN2_PIN         27       // IN2
 
 #define DHT_TYPE DHT11
-
 DHT dht(DHT_PIN, DHT_TYPE);
 
-// =========================
-// TIMER
-// =========================
-unsigned long lastSend = 0;
-const unsigned long sendInterval = 2000;
+// ======================================================
+// PWM L298
+// ======================================================
+const int FAN_PWM_CHANNEL = 0;
+const int FAN_PWM_FREQUENCY = 5000;
+const int FAN_PWM_RESOLUTION = 8;    // 0..255
 
-// =========================
-// NGƯỠNG
-// =========================
-// Người dùng có thể thay đổi các giá trị này
-float tempThreshold = 45.0;
-int gasThreshold = 700;
-
-// =========================
-// WEB CONTROL
-// =========================
-int webRelayForced = 0;
-
+const uint8_t FAN_SPEED_OFF = 0;
+const uint8_t FAN_SPEED_SLOW = 90;
+const uint8_t FAN_SPEED_NORMAL = 170;
+const uint8_t FAN_SPEED_FAST = 255;
 
 // ======================================================
-// KẾT NỐI WIFI
+// NGƯỠNG MẶC ĐỊNH
+// Có thể thay đổi sau khi bổ sung API nhận cấu hình từ frontend.
+// ======================================================
+float comfortTemperature = 28.0;     // Nhiệt độ người dùng cảm thấy dễ chịu
+const float comfortBand = 2.0;       // Tự tạo khoảng T-2 đến T+2
+int gasThreshold = 700;              // Giá trị ADC MQ-2, cần hiệu chỉnh thực tế
+
+// ======================================================
+// TIMER / TRẠNG THÁI
+// ======================================================
+const unsigned long sensorInterval = 2000;
+const unsigned long commandInterval = 3000;
+unsigned long lastSensorSend = 0;
+unsigned long lastCommandCheck = 0;
+
+int webRelayForced = 0;
+int currentFanSpeed = FAN_SPEED_OFF;
+
+// Relay active LOW
+const int RELAY_ON = LOW;
+const int RELAY_OFF = HIGH;
+
+// ======================================================
+// WIFI
 // ======================================================
 void connectWiFi() {
+  if (WiFi.status() == WL_CONNECTED) return;
 
   WiFi.begin(ssid, password);
-
   Serial.print("Connecting WiFi");
 
-  while (WiFi.status() != WL_CONNECTED) {
+  unsigned long start = millis();
+  while (WiFi.status() != WL_CONNECTED && millis() - start < 20000) {
     delay(500);
     Serial.print(".");
   }
 
   Serial.println();
-  Serial.println("WiFi Connected");
-
-  Serial.print("ESP32 IP: ");
-  Serial.println(WiFi.localIP());
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println("WiFi Connected");
+    Serial.print("ESP32 IP: ");
+    Serial.println(WiFi.localIP());
+  } else {
+    Serial.println("WiFi connection timeout");
+  }
 }
 
+// ======================================================
+// ĐIỀU KHIỂN QUẠT QUA L298
+// ======================================================
+void setFanSpeed(uint8_t speed) {
+  // Quạt chỉ quay một chiều.
+  digitalWrite(FAN_IN1_PIN, HIGH);
+  digitalWrite(FAN_IN2_PIN, LOW);
+
+  #if defined(ESP_ARDUINO_VERSION_MAJOR) && ESP_ARDUINO_VERSION_MAJOR >= 3
+    ledcWrite(FAN_PWM_PIN, speed);
+  #else
+    ledcWrite(FAN_PWM_CHANNEL, speed);
+  #endif
+  currentFanSpeed = speed;
+}
+
+String fanLevelName(uint8_t speed) {
+  if (speed == FAN_SPEED_OFF) return "TAT";
+  if (speed <= FAN_SPEED_SLOW) return "CHAM";
+  if (speed <= FAN_SPEED_NORMAL) return "BINH_THUONG";
+  return "NHANH";
+}
+
+// ======================================================
+// BUZZER
+// ======================================================
+void setBuzzer(bool enabled) {
+  digitalWrite(BUZZER_PIN, enabled ? HIGH : LOW);
+}
+
+// ======================================================
+// GỬI DỮ LIỆU LÊN BACKEND
+// ======================================================
+void sendSensorData(
+  float temperature,
+  float humidity,
+  int gas,
+  bool tempDanger,
+  bool gasDanger,
+  bool ventilationOn,
+  const String& alertReason
+) {
+  if (WiFi.status() != WL_CONNECTED) return;
+
+  HTTPClient http;
+  http.begin(serverName);
+  http.addHeader("Content-Type", "application/json");
+
+  StaticJsonDocument<768> doc;
+  doc["temperature"] = temperature;
+  doc["humidity"] = humidity;
+  doc["gas"] = gas;
+  doc["gasThreshold"] = gasThreshold;
+  doc["comfortTemperature"] = comfortTemperature;
+  doc["tempLow"] = comfortTemperature - comfortBand;
+  doc["tempHigh"] = comfortTemperature + comfortBand;
+  doc["temperatureDanger"] = tempDanger;
+  doc["gasDanger"] = gasDanger;
+  doc["alertReason"] = alertReason;
+
+  // Các trường này giúp frontend cũ vẫn hiển thị được trạng thái cơ bản.
+  doc["fanSpeed"] = currentFanSpeed;
+  doc["fanLevel"] = fanLevelName(currentFanSpeed);
+  doc["fanTran"] = currentFanSpeed > 0 ? 1 : 0;
+  doc["thongGio"] = ventilationOn ? 1 : 0;
+
+  String payload;
+  serializeJson(doc, payload);
+
+  int httpCode = http.POST(payload);
+  Serial.print("HTTP Send Data: ");
+  Serial.println(httpCode);
+  http.end();
+}
+
+// ======================================================
+// ĐỌC LỆNH TỪ WEB: buzzer và relay thông gió thủ công
+// ======================================================
+void resetBuzzerOnServer() {
+  if (WiFi.status() != WL_CONNECTED) return;
+
+  HTTPClient http;
+  http.begin(buzzerResetUrl);
+  http.addHeader("Content-Type", "application/json");
+  http.POST("{}");
+  http.end();
+}
+
+void runRemoteBuzzerPattern() {
+  for (int cycle = 0; cycle < 5; cycle++) {
+    for (int beep = 0; beep < 4; beep++) {
+      setBuzzer(true);
+      delay(150);
+      setBuzzer(false);
+      delay(100);
+    }
+    delay(800);
+  }
+}
+
+void checkWebCommands() {
+  if (WiFi.status() != WL_CONNECTED) return;
+
+  HTTPClient http;
+  http.begin(buzzerStatusUrl);
+  int responseCode = http.GET();
+
+  if (responseCode > 0) {
+    String payload = http.getString();
+    StaticJsonDocument<512> doc;
+    DeserializationError error = deserializeJson(doc, payload);
+
+    if (!error) {
+      if (doc.containsKey("relayManualId")) {
+        webRelayForced = doc["relayManualId"].as<int>();
+      }
+
+      if (doc["buzzerAlert"].as<int>() == 1) {
+        Serial.println("[WEB] Kich hoat buzzer tu xa");
+        runRemoteBuzzerPattern();
+        resetBuzzerOnServer();
+      }
+    } else {
+      Serial.println("[ERROR] Khong doc duoc JSON tu server");
+    }
+  }
+
+  http.end();
+}
 
 // ======================================================
 // SETUP
 // ======================================================
 void setup() {
-
   Serial.begin(115200);
 
   pinMode(MQ2_PIN, INPUT);
-
-  pinMode(RELAY_FAN_TRANN, OUTPUT);
-  pinMode(RELAY_THONG_GIO, OUTPUT);
-
   pinMode(BUZZER_PIN, OUTPUT);
+  pinMode(RELAY_THONG_GIO, OUTPUT);
+  pinMode(FAN_IN1_PIN, OUTPUT);
+  pinMode(FAN_IN2_PIN, OUTPUT);
+
+  // Khởi tạo PWM cho chân ENA của L298.
+  #if defined(ESP_ARDUINO_VERSION_MAJOR) && ESP_ARDUINO_VERSION_MAJOR >= 3
+    ledcAttachChannel(FAN_PWM_PIN, FAN_PWM_FREQUENCY, FAN_PWM_RESOLUTION, FAN_PWM_CHANNEL);
+  #else
+    ledcSetup(FAN_PWM_CHANNEL, FAN_PWM_FREQUENCY, FAN_PWM_RESOLUTION);
+    ledcAttachPin(FAN_PWM_PIN, FAN_PWM_CHANNEL);
+  #endif
 
   dht.begin();
+  setFanSpeed(FAN_SPEED_OFF);
+  digitalWrite(RELAY_THONG_GIO, RELAY_OFF);
+  setBuzzer(false);
 
-  // Relay active LOW
-  // HIGH = OFF
-  // LOW  = ON
-  digitalWrite(RELAY_FAN_TRANN, HIGH);
-  digitalWrite(RELAY_THONG_GIO, HIGH);
-
-  // Test buzzer
-  digitalWrite(BUZZER_PIN, HIGH);
-  delay(500);
-  digitalWrite(BUZZER_PIN, LOW);
+  // Test buzzer lúc khởi động.
+  setBuzzer(true);
+  delay(300);
+  setBuzzer(false);
 
   connectWiFi();
 }
-
 
 // ======================================================
 // LOOP
 // ======================================================
 void loop() {
-
-  // ----------------------------------------------------
-  // KIỂM TRA WIFI
-  // ----------------------------------------------------
   if (WiFi.status() != WL_CONNECTED) {
-
-    Serial.println("WiFi Lost!");
-
     connectWiFi();
   }
 
-
-  // ----------------------------------------------------
-  // ĐỌC CẢM BIẾN
-  // ----------------------------------------------------
-  if (millis() - lastSend >= sendInterval) {
-
-    lastSend = millis();
-
-    float t = dht.readTemperature();
-    float h = dht.readHumidity();
-
-    int g = analogRead(MQ2_PIN);
-
-
-    // Nếu DHT11 lỗi
-    if (isnan(t)) {
-      t = 0;
-    }
-
-    if (isnan(h)) {
-      h = 0;
-    }
-
-
-    // --------------------------------------------------
-    // HIỂN THỊ SERIAL
-    // --------------------------------------------------
-
-    Serial.println();
-    Serial.println("==============================");
-
-    Serial.print("Temperature : ");
-    Serial.print(t);
-    Serial.println(" C");
-
-    Serial.print("Humidity    : ");
-    Serial.print(h);
-    Serial.println(" %");
-
-    Serial.print("Gas / Smoke : ");
-    Serial.println(g);
-
-    Serial.print("Temp Limit  : ");
-    Serial.print(tempThreshold);
-    Serial.println(" C");
-
-    Serial.print("Gas Limit   : ");
-    Serial.println(gasThreshold);
-
-
-    // --------------------------------------------------
-    // SO SÁNH NGƯỠNG
-    // --------------------------------------------------
-
-    bool tempDanger = (t > tempThreshold);
-    bool gasDanger = (g > gasThreshold);
-
-    bool danger = tempDanger || gasDanger;
-
-
-    // ==================================================
-    // QUẠT TRẦN
-    // ==================================================
-
-    if (tempDanger) {
-
-      digitalWrite(RELAY_FAN_TRANN, LOW);
-
-      Serial.println(
-        "[FAN] Nhiet do vuot nguong -> BAT QUAT TRAN"
-      );
-
-    }
-    else {
-
-      digitalWrite(RELAY_FAN_TRANN, HIGH);
-
-      Serial.println(
-        "[FAN] Nhiet do binh thuong -> TAT QUAT TRAN"
-      );
-    }
-
-
-    // ==================================================
-    // QUẠT THÔNG GIÓ
-    // ==================================================
-
-    if (webRelayForced == 1 || danger) {
-
-      digitalWrite(RELAY_THONG_GIO, LOW);
-
-      Serial.println(
-        "[VENT] BAT QUAT THONG GIO"
-      );
-
-    }
-    else {
-
-      digitalWrite(RELAY_THONG_GIO, HIGH);
-
-      Serial.println(
-        "[VENT] TAT QUAT THONG GIO"
-      );
-    }
-
-
-    // ==================================================
-    // BUZZER
-    // ==================================================
-
-    String alertReason = "An toan";
-
-
-    if (gasDanger && tempDanger) {
-
-      digitalWrite(BUZZER_PIN, HIGH);
-
-      alertReason =
-        "Nguy hiem: Khi gas/khoi va nhiet do cao!";
-
-      Serial.println(
-        "[BUZZER] GAS + NHIET DO CAO"
-      );
-
-    }
-
-    else if (gasDanger) {
-
-      digitalWrite(BUZZER_PIN, HIGH);
-
-      alertReason =
-        "Canh bao: Khi gas/khoi vuot nguong!";
-
-      Serial.println(
-        "[BUZZER] GAS/KHOI VUOT NGUONG"
-      );
-
-    }
-
-    else if (tempDanger) {
-
-      digitalWrite(BUZZER_PIN, HIGH);
-
-      alertReason =
-        "Canh bao: Nhiet do vuot nguong!";
-
-      Serial.println(
-        "[BUZZER] NHIET DO VUOT NGUONG"
-      );
-
-    }
-
-    else {
-
-      digitalWrite(BUZZER_PIN, LOW);
-
-      alertReason = "An toan";
-    }
-
-
-    // ==================================================
-    // GỬI DỮ LIỆU LÊN SERVER
-    // ==================================================
-
-    if (WiFi.status() == WL_CONNECTED) {
-
-      HTTPClient http;
-
-      http.begin(serverName);
-
-      http.addHeader(
-        "Content-Type",
-        "application/json"
-      );
-
-
-      String json = "{";
-
-      json += "\"temperature\":";
-      json += String(t, 1);
-
-      json += ",";
-
-      json += "\"humidity\":";
-      json += String(h, 1);
-
-      json += ",";
-
-      json += "\"gas\":";
-      json += String(g);
-
-      json += ",";
-
-      json += "\"tempThreshold\":";
-      json += String(tempThreshold, 1);
-
-      json += ",";
-
-      json += "\"gasThreshold\":";
-      json += String(gasThreshold);
-
-      json += ",";
-
-      json += "\"alertReason\":\"";
-      json += alertReason;
-      json += "\"";
-
-      json += ",";
-
-      json += "\"fanTran\":";
-      json += String(
-        digitalRead(RELAY_FAN_TRANN) == LOW ? 1 : 0
-      );
-
-      json += ",";
-
-      json += "\"thongGio\":";
-      json += String(
-        digitalRead(RELAY_THONG_GIO) == LOW ? 1 : 0
-      );
-
-      json += "}";
-
-
-      int httpCode = http.POST(json);
-
-      Serial.print("HTTP Send Data: ");
-      Serial.println(httpCode);
-
-      http.end();
-    }
-
-
-    // ==================================================
-    // KIỂM TRA LỆNH WEB
-    // ==================================================
-
-    checkBuzzerCommand();
-  }
-}
-
-
-// ======================================================
-// KIỂM TRA LỆNH BUZZER / RELAY TỪ WEB
-// ======================================================
-void checkBuzzerCommand() {
-
-  if (WiFi.status() != WL_CONNECTED) {
-    return;
+  if (millis() - lastCommandCheck >= commandInterval) {
+    lastCommandCheck = millis();
+    checkWebCommands();
   }
 
-  HTTPClient http;
+  if (millis() - lastSensorSend < sensorInterval) return;
+  lastSensorSend = millis();
 
-  http.begin(buzzerStatusUrl);
+  float temperature = dht.readTemperature();
+  float humidity = dht.readHumidity();
+  int gas = analogRead(MQ2_PIN);
 
-  int httpResponseCode = http.GET();
-
-
-  if (httpResponseCode > 0) {
-
-    String payload = http.getString();
-
-    Serial.print("Server command: ");
-    Serial.println(payload);
-
-
-    DynamicJsonDocument doc(512);
-
-    DeserializationError error =
-      deserializeJson(doc, payload);
-
-
-    if (error) {
-
-      Serial.println(
-        "[ERROR] Khong doc duoc JSON tu server"
-      );
-
-      http.end();
-
-      return;
-    }
-
-
-    // --------------------------------------------------
-    // RELAY THỦ CÔNG
-    // --------------------------------------------------
-
-    if (doc.containsKey("relayManualId")) {
-
-      webRelayForced =
-        doc["relayManualId"].as<int>();
-
-      Serial.print(
-        "[WEB] relayManualId = "
-      );
-
-      Serial.println(webRelayForced);
-    }
-
-
-    // --------------------------------------------------
-    // BUZZER TỪ WEB
-    // --------------------------------------------------
-
-    int buzzerAlert = 0;
-
-    if (doc.containsKey("buzzerAlert")) {
-
-      buzzerAlert =
-        doc["buzzerAlert"].as<int>();
-    }
-
-
-    if (buzzerAlert == 1) {
-
-      Serial.println(
-        "[WEB] Kich hoat buzzer tu xa!"
-      );
-
-
-      for (int chuKy = 0; chuKy < 5; chuKy++) {
-
-        Serial.print("-> Chu ky coi: ");
-        Serial.println(chuKy + 1);
-
-
-        for (int bip = 0; bip < 4; bip++) {
-
-          digitalWrite(BUZZER_PIN, HIGH);
-          delay(150);
-
-          digitalWrite(BUZZER_PIN, LOW);
-          delay(100);
-        }
-
-        delay(800);
-      }
-
-
-      resetBuzzerOnServer();
-    }
+  bool dhtValid = !isnan(temperature) && !isnan(humidity);
+  if (!dhtValid) {
+    Serial.println("[ERROR] Khong doc duoc DHT11");
+    temperature = comfortTemperature;
+    humidity = 0;
   }
 
+  float lowTemperature = comfortTemperature - comfortBand;
+  float highTemperature = comfortTemperature + comfortBand;
+  bool tempDanger = dhtValid && temperature > highTemperature;
+  bool gasDanger = gas > gasThreshold;
+  bool danger = tempDanger || gasDanger;
 
-  http.end();
-}
-
-
-// ======================================================
-// RESET BUZZER TRÊN SERVER
-// ======================================================
-void resetBuzzerOnServer() {
-
-  if (WiFi.status() != WL_CONNECTED) {
-    return;
+  // Ưu tiên an toàn: gas hoặc nhiệt độ cao thì quạt nhanh.
+  if (gasDanger || tempDanger) {
+    setFanSpeed(FAN_SPEED_FAST);
+  } else if (temperature < lowTemperature) {
+    // Trời lạnh: tắt quạt. Có thể đổi thành FAN_SPEED_SLOW nếu cần.
+    setFanSpeed(FAN_SPEED_OFF);
+  } else {
+    setFanSpeed(FAN_SPEED_NORMAL);
   }
 
-  HTTPClient http;
+  // Quạt thông gió chỉ bật khi có nguy hiểm hoặc bị ép bật từ web.
+  bool ventilationOn = (webRelayForced == 1) || danger;
+  digitalWrite(RELAY_THONG_GIO, ventilationOn ? RELAY_ON : RELAY_OFF);
 
-  http.begin(buzzerResetUrl);
+  // Còi bật khi một trong các chỉ số vượt ngưỡng.
+  setBuzzer(danger);
 
-  http.addHeader(
-    "Content-Type",
-    "application/json"
+  String alertReason = "An toan";
+  if (tempDanger && gasDanger) {
+    alertReason = "Nguy hiem: Nhiet do cao va khi gas/khoi vuot nguong";
+  } else if (tempDanger) {
+    alertReason = "Canh bao: Nhiet do vuot nguong";
+  } else if (gasDanger) {
+    alertReason = "Canh bao: Khi gas/khoi vuot nguong";
+  }
+
+  Serial.println("==============================");
+  Serial.printf("Temperature: %.1f C | Humidity: %.1f %%\n", temperature, humidity);
+  Serial.printf("Gas: %d | Gas limit: %d\n", gas, gasThreshold);
+  Serial.printf("Comfort: %.1f C | Range: %.1f..%.1f C\n", comfortTemperature, lowTemperature, highTemperature);
+  Serial.printf("Fan: %d/255 (%s) | Vent: %s | Buzzer: %s\n",
+                currentFanSpeed,
+                fanLevelName(currentFanSpeed).c_str(),
+                ventilationOn ? "ON" : "OFF",
+                danger ? "ON" : "OFF");
+
+  sendSensorData(
+    temperature,
+    humidity,
+    gas,
+    tempDanger,
+    gasDanger,
+    ventilationOn,
+    alertReason
   );
-
-  int httpResponseCode =
-    http.POST("{}");
-
-  Serial.print(
-    "Buzzer reset response: "
-  );
-
-  Serial.println(httpResponseCode);
-
-  http.end();
 }
