@@ -17,8 +17,8 @@ app.use(express.json());
 // =========================================================
 // CẤU HÌNH VÀ HÀM GỬI TELEGRAM
 // =========================================================
-const TELEGRAM_BOT_TOKEN = "8966373592:AAF4IwUTWFC0Ln9ElfOoa8xfz9ca45EsO2Y";
-const TELEGRAM_CHAT_ID = "-5036187167";
+const TELEGRAM_BOT_TOKEN = "8926558047:AAGBCF0Tex1587_80v7NrYUECWqOtyX-D6g";
+const TELEGRAM_CHAT_ID = "7774086709";
 
 async function sendTelegramAlert(message) {
     if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) {
