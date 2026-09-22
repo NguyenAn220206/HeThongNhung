@@ -1,0 +1,8 @@
+Hệ thống theo dõi nhiệt độ, độ ẩm của lớp học
+- Theo dõi nhiệt độ, độ ẩm (DHT11)
+- Theo dõi khói, khí ga (MQ-2)
+- Nếu nhiệt độ vượt quá mức cho phép (theo 3 mức: mức bình thường, dưới mức bình thường và vướt mức) thì quạt trong lớp (vì là lớp học nên quạt đã bật sẵn cho hs ngồi) sẽ thay đổi tốc độ để phù hợp (ví dụ: mức bình thường quạt quay bình thường, dưới mức bình thường quạt quay chậm, nhiệt độ cao hơn mức thì quạt tăng tốc quay nhanh tản nhiệt)
+- Nếu phát hiện mức độ khói và khí ga vượt quá mức thì sẽ tăng quạt và khởi động quạt thông gió
+- Khi 1 trong những chỉ số vướt mức cho phép thì sẽ kích hoạt thêm còi buzzer báo nữa.
+- Các chỉ số mức ngưỡng sẽ đc do người dùng nhập ở trên fontend
+- hệ thống có camera để người dùng theo dõi và hiển thị trên hệ thống fontend

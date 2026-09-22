@@ -10,6 +10,7 @@ const char* ssid = "F87 Phong Lanh 2.4hz";
 const char* password = "68686868";
 
 const char* serverName = "http://192.168.1.20:3000/api/data";
+const char* configUrl = "http://192.168.1.20:3000/api/config";
 const char* buzzerStatusUrl = "http://192.168.1.20:3000/api/buzzer/status";
 const char* buzzerResetUrl = "http://192.168.1.20:3000/api/buzzer/reset";
 
@@ -54,8 +55,10 @@ int gasThreshold = 700;              // Giá trị ADC MQ-2, cần hiệu chỉn
 // ======================================================
 const unsigned long sensorInterval = 2000;
 const unsigned long commandInterval = 3000;
+const unsigned long configInterval = 5000;
 unsigned long lastSensorSend = 0;
 unsigned long lastCommandCheck = 0;
+unsigned long lastConfigFetch = 0;
 
 int webRelayForced = 0;
 int currentFanSpeed = FAN_SPEED_OFF;
@@ -177,6 +180,34 @@ void resetBuzzerOnServer() {
   http.end();
 }
 
+void fetchSystemConfig() {
+  if (WiFi.status() != WL_CONNECTED) return;
+
+  HTTPClient http;
+  http.begin(configUrl);
+  int responseCode = http.GET();
+
+  if (responseCode > 0) {
+    String payload = http.getString();
+    StaticJsonDocument<256> doc;
+    DeserializationError error = deserializeJson(doc, payload);
+
+    if (!error) {
+      if (doc.containsKey("comfortTemperature")) {
+        comfortTemperature = doc["comfortTemperature"].as<float>();
+      }
+      if (doc.containsKey("gasThreshold")) {
+        gasThreshold = doc["gasThreshold"].as<int>();
+      }
+      Serial.printf("[CONFIG] Comfort: %.1f C | Gas: %d\n", comfortTemperature, gasThreshold);
+    } else {
+      Serial.println("[ERROR] Khong doc duoc cau hinh tu server");
+    }
+  }
+
+  http.end();
+}
+
 void runRemoteBuzzerPattern() {
   for (int cycle = 0; cycle < 5; cycle++) {
     for (int beep = 0; beep < 4; beep++) {
@@ -263,6 +294,11 @@ void loop() {
   if (millis() - lastCommandCheck >= commandInterval) {
     lastCommandCheck = millis();
     checkWebCommands();
+  }
+
+  if (millis() - lastConfigFetch >= configInterval) {
+    lastConfigFetch = millis();
+    fetchSystemConfig();
   }
 
   if (millis() - lastSensorSend < sensorInterval) return;

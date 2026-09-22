@@ -32,6 +32,15 @@
                     <button id="relayBtn" class="btn-relay">TOGGLE RELAY</button>
                     <button id="alertBtn">ALERT</button>
                 </div>
+
+                <div class="card settings-card">
+                    <h2>Nhiệt độ mong muốn</h2>
+                    <label for="comfortTemperature">Nhập nhiệt độ dễ chịu (°C)</label>
+                    <input id="comfortTemperature" type="number" min="10" max="45" step="0.1" value="28">
+                    <small id="temperatureRange">Khoảng quạt: 26–30°C</small>
+                    <small>Nhấn Enter để gửi đến ESP32</small>
+                    <span id="configStatus" class="config-status"></span>
+                </div>
             </div>
 
             <h1 class="dashboard-title">THEO DÕI LỚP HỌC</h1>

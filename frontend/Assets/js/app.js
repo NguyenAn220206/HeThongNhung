@@ -1,5 +1,6 @@
 const BASE_URL = "http://localhost:3000";
 const API_URL = `${BASE_URL}/api/data`;
+const CONFIG_URL = `${BASE_URL}/api/config`;
 
 const socket = io(BASE_URL, {
     transports: ["websocket"]
@@ -11,6 +12,7 @@ let lastMotionAlert = null;
 let lastBackendAlert = null;
 let lastEsp32ActiveTime = null;
 let lastSystemReason = "An toàn";
+let currentGasThreshold = 700;
 
 const dotBackend = document.getElementById("statusBackend");
 const dotPython = document.getElementById("statusPython");
@@ -40,6 +42,10 @@ socket.on("sensor-data", (data) => {
     updateSensorUI(data);
     lastEsp32ActiveTime = Date.now(); 
     if (dotEsp32) dotEsp32.className = "dot dot-green";
+});
+
+socket.on("system-config", (config) => {
+    applyConfigToForm(config);
 });
 
 socket.on("new-alert", (alert) => {
@@ -129,7 +135,7 @@ function updateSensorUI(data) {
     const gasEl = document.getElementById("gas");
     if (gasEl) {
         gasEl.innerHTML = data.gas;
-        if (data.gas > 2000) {
+        if (data.gas > Number(data.gasThreshold ?? 700)) {
             gasEl.className = "value warning";
             const msgObj = { text: `⚠ Gas vượt ngưỡng: ${data.gas}`, image: "", imageCrop: "" };
             if (msgObj.text !== lastGasAlert) {
@@ -141,9 +147,93 @@ function updateSensorUI(data) {
         }
     }
 
+    if (data.comfortTemperature !== undefined) {
+        applyConfigToForm({
+            comfortTemperature: data.comfortTemperature,
+            gasThreshold: data.gasThreshold
+        });
+    }
+
     const updatedEl = document.getElementById("updatedAt");
     if (updatedEl) updatedEl.innerHTML = new Date(data.updatedAt).toLocaleTimeString();
 }
+
+function applyConfigToForm(config) {
+    const comfortInput = document.getElementById("comfortTemperature");
+    const gasInput = document.getElementById("gasThreshold");
+    const range = document.getElementById("temperatureRange");
+
+    if (comfortInput && document.activeElement !== comfortInput && config.comfortTemperature !== undefined) {
+        comfortInput.value = Number(config.comfortTemperature).toFixed(1);
+    }
+    if (gasInput && document.activeElement !== gasInput && config.gasThreshold !== undefined) {
+        gasInput.value = config.gasThreshold;
+    }
+    if (config.gasThreshold !== undefined) {
+        currentGasThreshold = Number(config.gasThreshold);
+    }
+    if (range && config.comfortTemperature !== undefined) {
+        const comfort = Number(config.comfortTemperature);
+        range.textContent = `Khoảng quạt: ${(comfort - 2).toFixed(1)}–${(comfort + 2).toFixed(1)}°C`;
+    }
+}
+
+async function saveComfortTemperature() {
+    const comfortInput = document.getElementById("comfortTemperature");
+    const status = document.getElementById("configStatus");
+    const comfortTemperature = Number(comfortInput?.value);
+
+    if (!Number.isFinite(comfortTemperature) || comfortTemperature < 10 || comfortTemperature > 45) {
+        if (status) status.textContent = "Nhập từ 10 đến 45°C";
+        return;
+    }
+
+    try {
+        const response = await fetch(CONFIG_URL, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                comfortTemperature,
+                gasThreshold: currentGasThreshold
+            })
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.message || "Không thể lưu cấu hình");
+
+        applyConfigToForm(result.config);
+        if (status) {
+            status.textContent = "Đã gửi ESP32";
+            status.style.color = "#2ecc71";
+        }
+    } catch (error) {
+        if (status) {
+            status.textContent = error.message;
+            status.style.color = "#e74c3c";
+        }
+    }
+}
+
+const comfortTemperatureInput = document.getElementById("comfortTemperature");
+if (comfortTemperatureInput) {
+    comfortTemperatureInput.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") {
+            event.preventDefault();
+            saveComfortTemperature();
+            comfortTemperatureInput.blur();
+        }
+    });
+}
+
+async function loadConfig() {
+    try {
+        const response = await fetch(CONFIG_URL);
+        if (response.ok) applyConfigToForm(await response.json());
+    } catch (error) {
+        console.log("Config loading error:", error);
+    }
+}
+
+loadConfig();
 
 function pushNotification(alertObj) {
     const last = notifications[notifications.length - 1];

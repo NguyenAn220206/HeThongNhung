@@ -74,6 +74,12 @@ let sensorData = {
     updatedAt: null
 };
 
+// ===== CẤU HÌNH NGƯỠNG DO NGƯỜI DÙNG NHẬP =====
+let systemConfig = {
+    comfortTemperature: 28.0,
+    gasThreshold: 700
+};
+
 // Biến bộ đệm (cache) để chống spam tin nhắn liên tục lên Telegram
 let lastTelegramReason = "An toàn";
 let isGasAlertSent = false;
@@ -180,8 +186,11 @@ app.post("/api/data", (req, res) => {
 
     const timeString = sensorData.updatedAt.toLocaleTimeString();
 
-    // 1. Gửi cảnh báo Khí Gas vượt ngưỡng (> 2000)
-    if (sensorData.gas > 2000) {
+    const gasLimit = Number(sensorData.gasThreshold ?? systemConfig.gasThreshold);
+    const temperatureLimit = Number(sensorData.tempHigh ?? (systemConfig.comfortTemperature + 2));
+
+    // 1. Gửi cảnh báo Khí Gas vượt ngưỡng cấu hình
+    if (sensorData.gas > gasLimit) {
         console.log("[ALERT] CANH BAO GAS! Đã vượt ngưỡng an toàn.");
         if (!isGasAlertSent) {
             sendTelegramAlert(`⚠️ <b>[CẢNH BÁO RÒ RỈ KHÍ GAS]</b>\n🔥 Giá trị đo được: ${sensorData.gas}\n🕒 Thời gian: ${timeString}`);
@@ -191,8 +200,8 @@ app.post("/api/data", (req, res) => {
         isGasAlertSent = false;
     }
 
-    // 2. Gửi cảnh báo Quá Nhiệt độ (> 50°C)
-    if (sensorData.temperature > 50) {
+    // 2. Gửi cảnh báo Nhiệt độ vượt T dễ chịu + 2°C
+    if (sensorData.temperature > temperatureLimit) {
         console.log("[ALERT] CANH BAO NHIET DO! Thiết bị quá nóng.");
         if (!isTempAlertSent) {
             sendTelegramAlert(`🥵 <b>[CẢNH BÁO QUÁ NHIỆT ĐỘ]</b>\n🌡 Nhiệt độ hiện tại: ${sensorData.temperature}°C\n🕒 Thời gian: ${timeString}`);
@@ -340,6 +349,42 @@ app.post("/api/clear-all", (req, res) => {
 
 app.get("/api/data", (req, res) => {
     res.json(sensorData);
+});
+
+// ===== API CẤU HÌNH NHIỆT ĐỘ DỄ CHỊU / NGƯỠNG GAS =====
+app.get("/api/config", (req, res) => {
+    res.json(systemConfig);
+});
+
+app.post("/api/config", (req, res) => {
+    const comfortTemperature = Number(req.body.comfortTemperature);
+    const gasThreshold = req.body.gasThreshold === undefined
+        ? systemConfig.gasThreshold
+        : Number(req.body.gasThreshold);
+
+    if (!Number.isFinite(comfortTemperature) || comfortTemperature < 10 || comfortTemperature > 45) {
+        return res.status(400).json({
+            success: false,
+            message: "Nhiệt độ dễ chịu phải nằm trong khoảng 10 đến 45°C."
+        });
+    }
+
+    if (!Number.isFinite(gasThreshold) || gasThreshold < 1 || gasThreshold > 4095) {
+        return res.status(400).json({
+            success: false,
+            message: "Ngưỡng gas phải nằm trong khoảng 1 đến 4095."
+        });
+    }
+
+    systemConfig = {
+        comfortTemperature: Math.round(comfortTemperature * 10) / 10,
+        gasThreshold: Math.round(gasThreshold)
+    };
+
+    io.emit("system-config", systemConfig);
+    console.log("[CONFIG] Đã cập nhật cấu hình:", systemConfig);
+
+    res.json({ success: true, config: systemConfig });
 });
 
 app.get("/", (req, res) => {
