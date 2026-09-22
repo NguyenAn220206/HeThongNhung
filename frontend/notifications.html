@@ -23,24 +23,6 @@
 
     <div id="list"></div>
 
-    <div id="imageModal">
-        <div class="modal-content">
-            <span id="closeModalBtn">&times;</span>
-            <h3 class="modal-title">Chi tiết hình ảnh xâm nhập vùng cấm</h3>
-            
-            <div class="modal-body">
-                <div class="full-image-container">
-                    <p>Ảnh toàn cảnh (Gốc)</p>
-                    <img id="modalFullImage" src="" alt="Không có dữ liệu ảnh toàn cảnh">
-                </div>
-                <div id="cropImageContainer" class="crop-container">
-                    <p>Đối tượng</p>
-                    <img id="modalCropImage" src="" alt="Không có ảnh cắt">
-                </div>
-            </div>
-        </div>
-    </div>
-
     <script>
         const BASE_URL = "http://localhost:3000"; 
         const list = document.getElementById("list");
@@ -63,90 +45,27 @@
                 div.className = "item";
 
                 let textMsg = "";
-                let fullImg = "";
-                let cropImg = "";
-
                 if (typeof itemData === 'object' && itemData !== null) {
                     textMsg = itemData.text || "";
-                    fullImg = itemData.image || "";
-                    cropImg = itemData.imageCrop || "";
                 } else {
                     textMsg = itemData;
-                    if (textMsg.includes("Ảnh: ")) {
-                        fullImg = textMsg.split("Ảnh: ")[1]?.trim() || "";
-                        if (fullImg) {
-                            cropImg = fullImg.replace(".jpg", "_crop.jpg");
-                        }
-                    }
                 }
-
-                if (!fullImg && textMsg.includes("<br>Ảnh:")) {
-                    textMsg = textMsg.split("<br>Ảnh:")[0];
-                }
-
-                div.setAttribute("data-img", fullImg);
-                div.setAttribute("data-crop", cropImg);
 
                 div.innerHTML = `
                     <div class="icon">🔔</div>
                     <div class="text">${textMsg}</div>
                 `;
 
-                if (fullImg || cropImg) {
-                    div.style.cursor = "pointer";
-                    div.addEventListener("click", () => {
-                        openImageModal(fullImg, cropImg);
-                    });
-                } else {
-                    div.style.cursor = "default";
-                }
-
                 list.appendChild(div);
             });
-        }
-
-        function openImageModal(fullImg, cropImg) {
-            const modal = document.getElementById("imageModal");
-            const modalFull = document.getElementById("modalFullImage");
-            const modalCrop = document.getElementById("modalCropImage");
-            const cropContainer = document.getElementById("cropImageContainer");
-            
-            const STATIC_IMAGE_PATH = `${BASE_URL}/images/`;
-
-            if (fullImg) {
-                modalFull.src = STATIC_IMAGE_PATH + fullImg;
-            } else {
-                modalFull.src = "";
-                modalFull.alt = "Lượt thông báo này không đính kèm hình ảnh toàn cảnh.";
-            }
-
-            if (cropImg) {
-                modalCrop.src = STATIC_IMAGE_PATH + cropImg;
-                cropContainer.style.display = "block";
-            } else {
-                modalCrop.src = "";
-                cropContainer.style.display = "none";
-            }
-
-            modal.style.display = "flex";
         }
 
         document.addEventListener("DOMContentLoaded", () => {
             renderList();
 
-            const modal = document.getElementById("imageModal");
-            const closeBtn = document.getElementById("closeModalBtn");
-
-            if (closeBtn && modal) {
-                closeBtn.addEventListener("click", () => modal.style.display = "none");
-                window.addEventListener("click", (e) => {
-                    if (e.target === modal) modal.style.display = "none";
-                });
-            }
-
             if (clearBtn) {
                 clearBtn.addEventListener("click", async () => {
-                    const confirmClean = confirm("Hành động này sẽ xóa sạch thông báo trên giao diện Web này, xóa file log.txt và toàn bộ ảnh trong thư mục python/images trên server. Bạn có chắc chắn?");
+                    const confirmClean = confirm("Bạn có chắc chắn muốn xóa toàn bộ lịch sử thông báo trên các giao diện đang mở không?");
                     if (!confirmClean) return;
 
                     try {

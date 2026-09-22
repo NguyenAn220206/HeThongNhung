@@ -8,14 +8,11 @@ const socket = io(BASE_URL, {
 
 let notifications = JSON.parse(localStorage.getItem("notifications")) || [];
 let lastGasAlert = null;
-let lastMotionAlert = null;
-let lastBackendAlert = null;
 let lastEsp32ActiveTime = null;
 let lastSystemReason = "An toàn";
 let currentGasThreshold = 700;
 
 const dotBackend = document.getElementById("statusBackend");
-const dotPython = document.getElementById("statusPython");
 const dotEsp32 = document.getElementById("statusEsp32");
 
 socket.on("connect", () => {
@@ -23,19 +20,11 @@ socket.on("connect", () => {
     if (dotBackend) {
         dotBackend.className = "dot dot-green";
     }
-    socket.emit("check-python-status"); 
 });
 
 socket.on("disconnect", () => {
     console.log("❌ System socket disconnected");
     if (dotBackend) dotBackend.className = "dot dot-red";
-    if (dotPython) dotPython.className = "dot dot-red";
-});
-
-socket.on("python-status", (isAlive) => {
-    if (dotPython) {
-        dotPython.className = isAlive ? "dot dot-green" : "dot dot-red";
-    }
 });
 
 socket.on("sensor-data", (data) => {
@@ -46,25 +35,6 @@ socket.on("sensor-data", (data) => {
 
 socket.on("system-config", (config) => {
     applyConfigToForm(config);
-});
-
-socket.on("new-alert", (alert) => {
-    const textHtml = `
-        <strong>[ALERT] PHÁT HIỆN XÂM NHẬP</strong><br>
-        Zone: ${alert.zone || "Không xác định"}<br>
-        Vào lúc: ${alert.enterTime || "--"}<br>
-        Ra lúc: ${alert.exitTime || "--"}<br>
-        Ở lại: ${alert.duration || "0"} giây<br>
-        Ảnh: ${alert.image || "Không có ảnh"}
-    `;
-    
-    const alertObject = {
-        text: textHtml,
-        image: alert.image || "",
-        imageCrop: alert.imageCrop || "" 
-    };
-    
-    pushNotification(alertObject);
 });
 
 // THÊM TẠI ĐÂY: Lắng nghe tín hiệu từ Backend khi bất kỳ thiết bị nào (App hoặc chính Web) yêu cầu xóa sạch
@@ -121,9 +91,7 @@ function updateSensorUI(data) {
 
         if (data.alertReason !== "An toàn" && data.alertReason !== lastSystemReason) {
             const systemAlertObj = {
-                text: `<strong>[ESP32 ALERT]</strong><br>${data.alertReason}<br>Thời gian: ${new Date().toLocaleTimeString()}`,
-                image: "", 
-                imageCrop: ""
+                text: `<strong>[ESP32 ALERT]</strong><br>${data.alertReason}<br>Thời gian: ${new Date().toLocaleTimeString()}`
             };
             pushNotification(systemAlertObj);
             lastSystemReason = data.alertReason;
@@ -137,7 +105,7 @@ function updateSensorUI(data) {
         gasEl.innerHTML = data.gas;
         if (data.gas > Number(data.gasThreshold ?? 700)) {
             gasEl.className = "value warning";
-            const msgObj = { text: `⚠ Gas vượt ngưỡng: ${data.gas}`, image: "", imageCrop: "" };
+            const msgObj = { text: `⚠ Gas vượt ngưỡng: ${data.gas}` };
             if (msgObj.text !== lastGasAlert) {
                 pushNotification(msgObj);
                 lastGasAlert = msgObj.text;
@@ -265,67 +233,14 @@ function updateNotificationUI() {
         const item = document.createElement("div");
         item.className = "notification-item";
         
-        const fullImg = itemData.image || "";
-        const cropImg = itemData.imageCrop || "";
-
-        item.setAttribute("data-img", fullImg);
-        item.setAttribute("data-crop", cropImg);
-
         item.innerHTML = `
             <div class="notification-icon">🔔</div>
             <div class="notification-text">${itemData.text}</div>
         `;
 
-        if (!fullImg && !cropImg) {
-            item.style.cursor = "default";
-            item.style.pointerEvents = "none"; 
-        } else {
-            item.addEventListener("click", () => {
-                openImageModal(fullImg, cropImg);
-            });
-        }
-
         list.appendChild(item);
     });
 }
-
-function openImageModal(fullImg, cropImg) {
-    const modal = document.getElementById("imageModal");
-    const modalFull = document.getElementById("modalFullImage");
-    const modalCrop = document.getElementById("modalCropImage");
-    const cropContainer = document.getElementById("cropImageContainer");
-    
-    const STATIC_IMAGE_PATH = `${BASE_URL}/images/`;
-
-    if (fullImg) {
-        modalFull.src = STATIC_IMAGE_PATH + fullImg;
-    } else {
-        modalFull.src = "";
-        modalFull.alt = "Lượt xâm nhập nhanh (Dưới 3s), không kích hoạt lưu ảnh toàn cảnh.";
-    }
-
-    if (cropImg) {
-        modalCrop.src = STATIC_IMAGE_PATH + cropImg;
-        cropContainer.classList.remove("hide-crop-box"); 
-    } else {
-        modalCrop.src = "";
-        cropContainer.classList.add("hide-crop-box");  
-    }
-
-    modal.style.display = "flex";
-}
-
-document.addEventListener("DOMContentLoaded", () => {
-    const modal = document.getElementById("imageModal");
-    const closeBtn = document.getElementById("closeModalBtn");
-
-    if (closeBtn && modal) {
-        closeBtn.addEventListener("click", () => modal.style.display = "none");
-        window.addEventListener("click", (e) => {
-            if (e.target === modal) modal.style.display = "none";
-        });
-    }
-});
 
 document.addEventListener("DOMContentLoaded", () => {
     const bell = document.getElementById("notificationBell");
@@ -391,6 +306,52 @@ if (relayBtn) {
         }
     });
 }
+
+// Camera chạy trực tiếp trong trình duyệt và không đi qua backend.
+const cameraFeed = document.getElementById("cameraFeed");
+const startCameraBtn = document.getElementById("startCameraBtn");
+const cameraStatus = document.getElementById("cameraStatus");
+let cameraStream = null;
+
+async function startCamera() {
+    if (!navigator.mediaDevices?.getUserMedia) {
+        if (cameraStatus) cameraStatus.textContent = "Trình duyệt không hỗ trợ camera";
+        return;
+    }
+
+    try {
+        cameraStream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: "user" },
+            audio: false
+        });
+        if (cameraFeed) cameraFeed.srcObject = cameraStream;
+        if (cameraStatus) cameraStatus.textContent = "Camera đang hoạt động";
+        if (startCameraBtn) startCameraBtn.textContent = "TẮT CAMERA";
+    } catch (error) {
+        console.error("Không thể mở camera:", error);
+        if (cameraStatus) {
+            cameraStatus.textContent = error.name === "NotAllowedError"
+                ? "Bạn chưa cấp quyền camera"
+                : "Không tìm thấy camera";
+        }
+    }
+}
+
+function stopCamera() {
+    cameraStream?.getTracks().forEach(track => track.stop());
+    cameraStream = null;
+    if (cameraFeed) cameraFeed.srcObject = null;
+    if (cameraStatus) cameraStatus.textContent = "Camera đã tắt";
+    if (startCameraBtn) startCameraBtn.textContent = "BẬT CAMERA";
+}
+
+if (startCameraBtn) {
+    startCameraBtn.addEventListener("click", () => {
+        cameraStream ? stopCamera() : startCamera();
+    });
+}
+
+window.addEventListener("beforeunload", stopCamera);
 
 updateNotificationUI();
 

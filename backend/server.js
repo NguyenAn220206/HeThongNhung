@@ -2,8 +2,6 @@ const express = require("express");
 const cors = require("cors");
 const http = require("http");
 const { Server } = require("socket.io");
-const path = require("path");
-const fs = require("fs"); 
 const fetch = require("node-fetch"); // Đảm bảo đã chạy npm install node-fetch@2
 
 const app = express();
@@ -15,9 +13,6 @@ const io = new Server(server, {
 
 app.use(cors());
 app.use(express.json());
-
-// ===== STATIC IMAGE =====
-app.use("/images", express.static(path.join(__dirname, "../python/images")));
 
 // =========================================================
 // CẤU HÌNH VÀ HÀM GỬI TELEGRAM
@@ -60,9 +55,6 @@ async function sendTelegramAlert(message) {
     }
 }
 
-// ===== BIẾN TOÀN CỤC LƯU FRAME HÌNH ẢNH AI TỪ PYTHON =====
-let latestPythonFrame = null;
-
 // ===== SENSOR DATA =====
 let sensorData = {
     temperature: 0,
@@ -89,86 +81,15 @@ let isTempAlertSent = false;
 let shouldBuzzerSound = 0; // 0: Tắt còi, 1: Bật còi kêu khẩn cấp
 let manualRelayState = 0;  // THÊM: 0: Chạy tự động/bình thường, 1: Ép ngắt Relay từ Web
 
-// ===== ALERT LIST =====
-let alerts = [];
-
-// Biến toàn cục lưu giữ trạng thái sống của luồng Python AI
-let isPythonConnected = false;
-
 // ===== SOCKET MANAGEMENT =====
 io.on("connection", (socket) => {
-    const userAgent = socket.handshake.headers["user-agent"] || "";
-    let clientType = "Frontend Web";
-
-    if (userAgent.includes("Python") || userAgent.includes("python")) {
-        clientType = "Python AI Edge";
-        isPythonConnected = true; 
-        console.log(`[LOG] ỨNG DỤNG PYTHON AI ĐÃ KẾT NỐI! (ID: ${socket.id})`);
-        io.emit("python-status", true); 
-    } else {
-        console.log(`[LOG] Frontend đã kết nối. (ID: ${socket.id})`);
-        socket.emit("python-status", isPythonConnected); 
-    }
-
-    socket.on("check-python-status", () => {
-        socket.emit("python-status", isPythonConnected);
-    });
+    console.log(`[LOG] Frontend đã kết nối. (ID: ${socket.id})`);
 
     socket.emit("sensor-data", sensorData);
-    socket.emit("alert-list", alerts);
 
     socket.on("disconnect", (reason) => {
-        if (clientType === "Python AI Edge") {
-            isPythonConnected = false; 
-            console.log(`[WARNING][Socket] PYTHON ĐÃ MẤT KẾT NỐI! (Lý do: ${reason})`);
-            io.emit("python-status", false); 
-        } else {
-            console.log(`[WARNING] Frontend đã ngắt kết nối. (Lý do: ${reason})`);
-        }
+        console.log(`[WARNING] Frontend đã ngắt kết nối. (Lý do: ${reason})`);
     });
-});
-
-// ===== CÁC API PHỤC VỤ STREAM HÌNH ẢNH ĐỒNG BỘ =====
-app.post("/api/video-stream", express.raw({ type: 'image/jpeg', limit: '10mb' }), (req, res) => {
-    latestPythonFrame = req.body;
-    res.end();
-});
-
-app.get("/api/video-feed", (req, res) => {
-    res.writeHead(200, {
-        'Content-Type': 'multipart/x-mixed-replace; boundary=frame',
-        'Cache-Control': 'no-cache',
-        'Connection': 'close',
-        'Pragma': 'no-cache'
-    });
-
-    const streamInterval = setInterval(() => {
-        if (latestPythonFrame) {
-            res.write(`--frame\r\n`);
-            res.write(`Content-Type: image/jpeg\r\n`);
-            res.write(`Content-Length: ${latestPythonFrame.length}\r\n\r\n`);
-            res.write(latestPythonFrame);
-            res.write(`\r\n`);
-        }
-    }, 40);
-
-    req.on('close', () => {
-        clearInterval(streamInterval);
-    });
-});
-
-app.get("/api/video-snapshot", (req, res) => {
-    if (latestPythonFrame) {
-        res.writeHead(200, {
-            'Content-Type': 'image/jpeg',
-            'Cache-Control': 'no-cache, no-store, must-revalidate',
-            'Pragma': 'no-cache',
-            'Expires': '0'
-        });
-        res.end(latestPythonFrame); 
-    } else {
-        res.status(404).send("Chưa có frame ảnh nào từ Python AI");
-    }
 });
 
 // ===== ESP32 DATA =====
@@ -236,39 +157,6 @@ app.post("/api/data", (req, res) => {
     });
 });
 
-// ===== PYTHON ALERT =====
-app.post("/api/alert", (req, res) => {
-    const alert = {
-        id: Date.now(),
-        image: req.body.image,
-        imageCrop: req.body.imageCrop, 
-        zone: req.body.zone,
-        enterTime: req.body.enterTime,
-        exitTime: req.body.exitTime,
-        duration: req.body.duration,
-        createdAt: new Date(),
-        sensor: sensorData
-    };
-
-    alerts.unshift(alert);
-
-    console.log("=================================");
-    console.log("[ALERT] PHÁT HIỆN XÂM NHẬP");
-    console.log("Zone:", alert.zone);
-    console.log("Vào lúc:", alert.enterTime);
-    console.log("Ra lúc:", alert.exitTime);
-    console.log("Ở lại:", alert.duration, "giây");
-    console.log("Ảnh:", alert.image);
-    console.log("Ảnh Crop:", alert.imageCrop);
-    console.log("=================================");
-
-    io.emit("new-alert", alert);
-
-    res.json({
-        success: true
-    });
-});
-
 // ===== CÁC API PHỤC VỤ ĐIỀU KHIỂN CÒI BUZZER TỪ NÚT WEB =====
 // SỬA ĐỔI TẠI ĐÂY: Thêm chức năng bắn tin nhắn Telegram khi nhấn nút ALERT trên web dashboard
 app.post("/api/buzzer/trigger", (req, res) => {
@@ -311,39 +199,17 @@ app.post("/api/buzzer/reset", (req, res) => {
 // ===== API CLEAR TOÀN BỘ DỮ LIỆU HỆ THỐNG =====
 app.post("/api/clear-all", (req, res) => {
     try {
-        alerts = [];
-        io.emit("alert-list", alerts);
-
-        const logFilePath = path.join(__dirname, "../python", "log.txt");
-        const imagesFolderPath = path.join(__dirname, "../python", "images");
-
-        if (fs.existsSync(logFilePath)) {
-            fs.unlinkSync(logFilePath);
-            console.log("[CLEAN] Đã xóa file nhật ký log.txt.");
-        }
-
-        if (fs.existsSync(imagesFolderPath)) {
-            const files = fs.readdirSync(imagesFolderPath);
-            files.forEach((file) => {
-                if (file.endsWith(".jpg") || file.endsWith(".jpeg") || file.endsWith(".png")) {
-                    fs.unlinkSync(path.join(imagesFolderPath, file));
-                }
-            });
-            console.log("[CLEAN] Đã dọn dẹp sạch toàn bộ kho ảnh lưu trữ trong python/images.");
-        }
-
-        // THÊM TẠI ĐÂY: Phát tín hiệu Socket báo cho cả App và Web xóa lịch sử cục bộ
         io.emit("history-cleared");
         console.log("[SYNC] Đã phát tín hiệu 'history-cleared' tới tất cả Client đang kết nối.");
 
         res.json({
             success: true,
-            message: "Xóa dữ liệu ổ cứng server thành công."
+            message: "Đã xóa lịch sử thông báo trên các giao diện đang kết nối."
         });
 
     } catch (error) {
-        console.error("[ERROR] Lỗi dọn dẹp tệp tin hệ thống:", error);
-        res.status(500).json({ success: false, message: "Lỗi dọn dẹp dữ liệu server." });
+        console.error("[ERROR] Lỗi đồng bộ xóa lịch sử:", error);
+        res.status(500).json({ success: false, message: "Lỗi xóa lịch sử thông báo." });
     }
 });
 

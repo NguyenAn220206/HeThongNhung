@@ -37,8 +37,7 @@
                     <h2>Nhiệt độ mong muốn</h2>
                     <label for="comfortTemperature">Nhập nhiệt độ dễ chịu (°C)</label>
                     <input id="comfortTemperature" type="number" min="10" max="45" step="0.1" value="28">
-                    <small id="temperatureRange">Khoảng quạt: 26–30°C</small>
-                    <small>Nhấn Enter để gửi đến ESP32</small>
+                    <small>Nhấn Enter để xác nhận!</small>
                     <span id="configStatus" class="config-status"></span>
                 </div>
             </div>
@@ -67,7 +66,11 @@
         </div>
 
         <div class="camera-view">
-            <img id="cameraFeed" class="python-stream-view" src="http://localhost:3000/api/video-feed" alt="Đang kết nối luồng xử lý từ Python AI...">
+            <video id="cameraFeed" class="camera-feed" autoplay muted playsinline></video>
+            <div class="camera-overlay">
+                <button id="startCameraBtn" type="button">BẬT CAMERA</button>
+                <span id="cameraStatus">Camera chưa được bật</span>
+            </div>
         </div>
     </div>
 
@@ -82,30 +85,8 @@
                 <span class="status-label">Backend</span>
             </div>
             <div class="status-item">
-                <span id="statusPython" class="dot dot-red"></span>
-                <span class="status-label">Python AI</span>
-            </div>
-            <div class="status-item">
                 <span id="statusEsp32" class="dot dot-red"></span>
                 <span class="status-label">ESP32</span>
-            </div>
-        </div>
-    </div>
-
-    <div id="imageModal">
-        <div class="modal-content">
-            <span id="closeModalBtn">&times;</span>
-            <h3 class="modal-title">Chi tiết hình ảnh xâm nhập vùng cấm</h3>
-            
-            <div class="modal-body">
-                <div class="full-image-container">
-                    <p>Ảnh toàn cảnh (Gốc)</p>
-                    <img id="modalFullImage" src="" alt="Không có dữ liệu ảnh toàn cảnh">
-                </div>
-                <div id="cropImageContainer" class="crop-container">
-                    <p>Đối tượng</p>
-                    <img id="modalCropImage" src="" alt="Không có ảnh cắt">
-                </div>
             </div>
         </div>
     </div>
