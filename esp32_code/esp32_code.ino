@@ -9,10 +9,10 @@
 const char* ssid = "F87 Phong Lanh 2.4hz";
 const char* password = "68686868";
 
-const char* serverName = "http://192.168.1.21:3000/api/data";
-const char* configUrl = "http://192.168.1.21:3000/api/config";
-const char* buzzerStatusUrl = "http://192.168.1.21:3000/api/buzzer/status";
-const char* buzzerResetUrl = "http://192.168.1.21:3000/api/buzzer/reset";
+const char* serverName = "http://192.168.1.27:3000/api/data";
+const char* configUrl = "http://192.168.1.27:3000/api/config";
+const char* buzzerStatusUrl = "http://192.168.1.27:3000/api/buzzer/status";
+const char* buzzerResetUrl = "http://192.168.1.27:3000/api/buzzer/reset";
 
 // ======================================================
 // GPIO - KHỚP VỚI SƠ ĐỒ PROTEUS
@@ -63,9 +63,9 @@ unsigned long lastConfigFetch = 0;
 int webRelayForced = 0;  // 0: tự động theo gas, 1: ép bật relay từ Web
 int currentFanSpeed = FAN_SPEED_OFF;
 
-// Relay active LOW
-const int RELAY_ON = LOW;
-const int RELAY_OFF = HIGH;
+// Relay active high
+const int RELAY_ON = HIGH;
+const int RELAY_OFF = LOW;
 
 // ======================================================
 // WIFI

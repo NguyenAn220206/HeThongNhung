@@ -169,6 +169,29 @@ app.post("/api/buzzer/trigger", (req, res) => {
     res.json({ success: true, message: "Buzzer state set to 1 and Telegram alert sent" });
 });
 
+// API: Đặt trực tiếp trạng thái ép relay từ dashboard
+app.post("/api/relay/set", (req, res) => {
+    const relayState = Number(req.body.relayState);
+
+    if (relayState !== 0 && relayState !== 1) {
+        return res.status(400).json({
+            success: false,
+            message: "relayState phải là 0 hoặc 1"
+        });
+    }
+
+    manualRelayState = relayState;
+    console.log(`[CONTROL] Đặt trạng thái ép Relay từ Web: ${manualRelayState}`);
+
+    res.json({
+        success: true,
+        relayState: manualRelayState,
+        message: manualRelayState === 1
+            ? "Đã yêu cầu bật Relay"
+            : "Đã đưa Relay về chế độ tự động"
+    });
+});
+
 // API: Chuyển giữa chế độ ép bật relay và chế độ tự động theo cảm biến
 app.post("/api/relay/toggle", (req, res) => {
     // Đảo trạng thái 0 <-> 1

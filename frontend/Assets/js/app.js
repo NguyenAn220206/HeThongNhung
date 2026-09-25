@@ -287,6 +287,8 @@ const relayBtn = document.getElementById("relayBtn");
 function updateRelayButton(relayState) {
     if (!relayBtn) return;
 
+    relayBtn.dataset.relayState = Number(relayState) === 1 ? "1" : "0";
+
     if (Number(relayState) === 1) {
         relayBtn.style.background = "#27ae60";
         relayBtn.innerText = "RELAY: ON (FORCED)";
@@ -310,20 +312,24 @@ async function loadRelayStatus() {
 
 if (relayBtn) {
     relayBtn.addEventListener("click", async () => {
+        const currentState = Number(relayBtn.dataset.relayState || 0);
+        const nextState = currentState === 1 ? 0 : 1;
+
         try {
-            const response = await fetch(`${BASE_URL}/api/relay/toggle`, {
-                method: "POST"
+            const response = await fetch(`${BASE_URL}/api/relay/set`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({ relayState: nextState })
             });
             const data = await response.json();
-            if (data.success) {
-                if (data.relayState === 1) {
-                    alert("✅ Đã ra lệnh ÉP BẬT RELAY từ xa!");
-                    updateRelayButton(1);
-                } else {
-                    alert("✅ Đã đưa Relay về chế độ TỰ ĐỘNG theo cảm biến!");
-                    updateRelayButton(0);
-                }
+
+            if (!response.ok || !data.success) {
+                throw new Error(data.message || "Không thể điều khiển Relay");
             }
+
+            updateRelayButton(data.relayState);
         } catch (error) {
             console.log("Error toggling relay:", error);
             alert("❌ Không thể kết nối tới server để điều khiển Relay!");
