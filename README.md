@@ -129,6 +129,6 @@ Các API điều khiển relay, buzzer và xóa lịch sử hiện chưa có xá
 - Lưu dữ liệu cảm biến vào cơ sở dữ liệu để vẽ biểu đồ lịch sử.
 - Thêm Docker Compose và kiểm thử API.
 
-## Tác giả
+## Link Github Sản phẩm
 
 NguyenAn220206 — [repository HeThongNhung](https://github.com/NguyenAn220206/HeThongNhung)
