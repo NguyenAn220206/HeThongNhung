@@ -79,7 +79,7 @@ let isTempAlertSent = false;
 
 // ===== CHỨC NĂNG MỚI KHÁC (GIỮ NGUYÊN) =====
 let shouldBuzzerSound = 0; // 0: Tắt còi, 1: Bật còi kêu khẩn cấp
-let manualRelayState = 0;  // THÊM: 0: Chạy tự động/bình thường, 1: Ép ngắt Relay từ Web
+let manualRelayState = 0;  // 0: Chạy tự động theo cảm biến, 1: Ép bật Relay từ Web
 
 // ===== SOCKET MANAGEMENT =====
 io.on("connection", (socket) => {
@@ -169,23 +169,31 @@ app.post("/api/buzzer/trigger", (req, res) => {
     res.json({ success: true, message: "Buzzer state set to 1 and Telegram alert sent" });
 });
 
-// THÊM API: Nhận lệnh bật/tắt ép buộc từ Web Dashboard
+// API: Chuyển giữa chế độ ép bật relay và chế độ tự động theo cảm biến
 app.post("/api/relay/toggle", (req, res) => {
     // Đảo trạng thái 0 <-> 1
     manualRelayState = manualRelayState === 0 ? 1 : 0;
-    console.log(`[CONTROL] Người dùng thay đổi trạng thái ép ngắt Relay trên Web: ${manualRelayState}`);
+    console.log(`[CONTROL] Người dùng thay đổi trạng thái ép bật Relay trên Web: ${manualRelayState}`);
     
     res.json({ 
         success: true, 
         relayState: manualRelayState, 
-        message: manualRelayState === 1 ? "Đã ra lệnh ép ngắt Relay" : "Đã trả về chế độ tự động" 
+        message: manualRelayState === 1 ? "Đã ra lệnh ép bật Relay" : "Đã trả về chế độ tự động"
+    });
+});
+
+app.get("/api/relay/status", (req, res) => {
+    res.json({
+        success: true,
+        relayState: manualRelayState,
+        message: manualRelayState === 1 ? "Relay đang được ép bật" : "Relay đang ở chế độ tự động"
     });
 });
 
 app.get("/api/buzzer/status", (req, res) => {
     res.json({ 
         buzzerAlert: shouldBuzzerSound,
-        relayManualId: manualRelayState 
+        relayManualState: manualRelayState
     });
 });
 

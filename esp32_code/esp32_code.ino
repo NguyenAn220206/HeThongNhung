@@ -9,10 +9,10 @@
 const char* ssid = "F87 Phong Lanh 2.4hz";
 const char* password = "68686868";
 
-const char* serverName = "http://192.168.1.20:3000/api/data";
-const char* configUrl = "http://192.168.1.20:3000/api/config";
-const char* buzzerStatusUrl = "http://192.168.1.20:3000/api/buzzer/status";
-const char* buzzerResetUrl = "http://192.168.1.20:3000/api/buzzer/reset";
+const char* serverName = "http://192.168.1.21:3000/api/data";
+const char* configUrl = "http://192.168.1.21:3000/api/config";
+const char* buzzerStatusUrl = "http://192.168.1.21:3000/api/buzzer/status";
+const char* buzzerResetUrl = "http://192.168.1.21:3000/api/buzzer/reset";
 
 // ======================================================
 // GPIO - KHỚP VỚI SƠ ĐỒ PROTEUS
@@ -60,7 +60,7 @@ unsigned long lastSensorSend = 0;
 unsigned long lastCommandCheck = 0;
 unsigned long lastConfigFetch = 0;
 
-int webRelayForced = 0;
+int webRelayForced = 0;  // 0: tự động theo gas, 1: ép bật relay từ Web
 int currentFanSpeed = FAN_SPEED_OFF;
 
 // Relay active LOW
@@ -233,8 +233,8 @@ void checkWebCommands() {
     DeserializationError error = deserializeJson(doc, payload);
 
     if (!error) {
-      if (doc.containsKey("relayManualId")) {
-        webRelayForced = doc["relayManualId"].as<int>();
+      if (doc.containsKey("relayManualState")) {
+        webRelayForced = doc["relayManualState"].as<int>();
       }
 
       if (doc["buzzerAlert"].as<int>() == 1) {
@@ -331,8 +331,9 @@ void loop() {
     setFanSpeed(FAN_SPEED_NORMAL);
   }
 
-  // Quạt thông gió chỉ bật khi có nguy hiểm hoặc bị ép bật từ web.
-  bool ventilationOn = (webRelayForced == 1) || danger;
+  // Relay bật khi bị ép từ Web hoặc khi khí gas vượt ngưỡng.
+  // webRelayForced = 1 có ưu tiên bật relay, không vô hiệu hóa logic an toàn tự động.
+  bool ventilationOn = webRelayForced == 1 || gasDanger;
   digitalWrite(RELAY_THONG_GIO, ventilationOn ? RELAY_ON : RELAY_OFF);
 
   // Còi bật khi một trong các chỉ số vượt ngưỡng.

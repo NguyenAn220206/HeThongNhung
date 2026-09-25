@@ -102,7 +102,8 @@ ESP32 phải truy cập được máy chạy backend trong cùng mạng LAN.
 | `GET` | `/api/config` | Lấy cấu hình ngưỡng |
 | `POST` | `/api/config` | Cập nhật nhiệt độ tiện nghi và ngưỡng gas |
 | `POST` | `/api/buzzer/trigger` | Kích hoạt còi từ dashboard |
-| `POST` | `/api/relay/toggle` | Chuyển relay giữa chế độ ép ngắt/tự động |
+| `POST` | `/api/relay/toggle` | Chuyển relay giữa chế độ ép bật/tự động |
+| `GET` | `/api/relay/status` | Đọc trạng thái ép bật/tự động của relay |
 | `POST` | `/api/clear-all` | Xóa lịch sử thông báo trên các dashboard |
 
 Luồng camera không sử dụng API backend; video được lấy trực tiếp từ thiết bị camera bằng `navigator.mediaDevices.getUserMedia()`.

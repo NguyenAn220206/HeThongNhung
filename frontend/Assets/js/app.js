@@ -1,6 +1,7 @@
 const BASE_URL = "http://localhost:3000";
 const API_URL = `${BASE_URL}/api/data`;
 const CONFIG_URL = `${BASE_URL}/api/config`;
+const RELAY_STATUS_URL = `${BASE_URL}/api/relay/status`;
 
 const socket = io(BASE_URL, {
     transports: ["websocket"]
@@ -282,6 +283,31 @@ if (alertBtn) {
 
 // ===== ĐIỀU KHIỂN RELAY TỪ NÚT WEB =====
 const relayBtn = document.getElementById("relayBtn");
+
+function updateRelayButton(relayState) {
+    if (!relayBtn) return;
+
+    if (Number(relayState) === 1) {
+        relayBtn.style.background = "#27ae60";
+        relayBtn.innerText = "RELAY: ON (FORCED)";
+    } else {
+        relayBtn.style.background = "#7f8c8d";
+        relayBtn.innerText = "RELAY: AUTO";
+    }
+}
+
+async function loadRelayStatus() {
+    try {
+        const response = await fetch(RELAY_STATUS_URL);
+        if (response.ok) {
+            const data = await response.json();
+            updateRelayButton(data.relayState);
+        }
+    } catch (error) {
+        console.log("Relay status loading error:", error);
+    }
+}
+
 if (relayBtn) {
     relayBtn.addEventListener("click", async () => {
         try {
@@ -291,13 +317,11 @@ if (relayBtn) {
             const data = await response.json();
             if (data.success) {
                 if (data.relayState === 1) {
-                    alert("🛑 Đã ra lệnh ÉP NGẮT RELAY (Mô-tơ dừng) từ xa!");
-                    relayBtn.style.background = "#7f8c8d"; 
-                    relayBtn.innerText = "RELAY: OFF (FORCED)";
+                    alert("✅ Đã ra lệnh ÉP BẬT RELAY từ xa!");
+                    updateRelayButton(1);
                 } else {
                     alert("✅ Đã đưa Relay về chế độ TỰ ĐỘNG theo cảm biến!");
-                    relayBtn.style.background = "#27ae60"; 
-                    relayBtn.innerText = "TOGGLE RELAY";
+                    updateRelayButton(0);
                 }
             }
         } catch (error) {
@@ -306,6 +330,8 @@ if (relayBtn) {
         }
     });
 }
+
+loadRelayStatus();
 
 // Camera chạy trực tiếp trong trình duyệt và không đi qua backend.
 const cameraFeed = document.getElementById("cameraFeed");
