@@ -52,6 +52,7 @@ const uint8_t FAN_SPEED_FAST = 255;
 float comfortTemperature = 28.0;     // Nhiệt độ người dùng cảm thấy dễ chịu
 const float comfortBand = 2.0;       // Tự tạo khoảng T-2 đến T+2
 int gasThreshold = 70;              // Giá trị ADC MQ-2, cần hiệu chỉnh thực tế
+const float humidityThreshold = 80.0; // Ngưỡng độ ẩm cao (%)
 
 // ======================================================
 // TIMER / TRẠNG THÁI
@@ -67,6 +68,7 @@ int webRelayForced = 0;  // 0: tự động theo gas, 1: ép bật relay từ We
 bool localRelayForced = false; // Trạng thái relay do nút vật lý điều khiển
 bool localFanMaxForced = false; // Trạng thái ép quạt MAX do nút vật lý điều khiển
 bool localBuzzerEnabled = false; // Trạng thái còi do nút vật lý điều khiển
+bool sensorDangerActive = false; // Cảnh báo cảm biến được giữ giữa các vòng lặp
 int currentFanSpeed = FAN_SPEED_OFF;
 
 // Trạng thái chống dội cho nút relay.
@@ -240,6 +242,7 @@ void sendSensorData(
   int gas,
   bool tempDanger,
   bool gasDanger,
+  bool humidityDanger,
   bool ventilationOn,
   const String& alertReason
 ) {
@@ -254,11 +257,13 @@ void sendSensorData(
   doc["humidity"] = humidity;
   doc["gas"] = gas;
   doc["gasThreshold"] = gasThreshold;
+  doc["humidityThreshold"] = humidityThreshold;
   doc["comfortTemperature"] = comfortTemperature;
   doc["tempLow"] = comfortTemperature - comfortBand;
   doc["tempHigh"] = comfortTemperature + comfortBand;
   doc["temperatureDanger"] = tempDanger;
   doc["gasDanger"] = gasDanger;
+  doc["humidityDanger"] = humidityDanger;
   doc["alertReason"] = alertReason;
 
   // Các trường này giúp frontend cũ vẫn hiển thị được trạng thái cơ bản.
@@ -407,7 +412,7 @@ void loop() {
   handleButtons();
   // Cập nhật còi thường xuyên để tạo nhịp kêu ngắt quãng mượt.
   // Cảnh báo cảm biến sẽ được OR thêm sau khi đọc cảm biến.
-  updateIntermittentBuzzer(localBuzzerEnabled);
+  updateIntermittentBuzzer(localBuzzerEnabled || sensorDangerActive);
 
   if (millis() - lastCommandCheck >= commandInterval) {
     lastCommandCheck = millis();
@@ -437,13 +442,15 @@ void loop() {
   float highTemperature = comfortTemperature + comfortBand;
   bool tempDanger = dhtValid && temperature > highTemperature;
   bool gasDanger = gas > gasThreshold;
-  bool danger = tempDanger || gasDanger;
+  bool humidityDanger = dhtValid && humidity > humidityThreshold;
+  bool danger = tempDanger || gasDanger || humidityDanger;
+  sensorDangerActive = danger;
 
   // Nút giữa đổi trạng thái ép quạt chạy mức MAX.
   // Nhấn lần nữa để trở lại chế độ tự động.
   if (localFanMaxForced) {
     setFanSpeed(FAN_SPEED_FAST);
-  } else if (gasDanger || tempDanger) {
+  } else if (gasDanger || tempDanger || humidityDanger) {
     setFanSpeed(FAN_SPEED_FAST);
   } else if (temperature < lowTemperature) {
     // Trời lạnh: tắt quạt. Có thể đổi thành FAN_SPEED_SLOW nếu cần.
@@ -456,7 +463,7 @@ void loop() {
   // webRelayForced = 1 có ưu tiên bật relay, không vô hiệu hóa logic an toàn tự động.
   // Trạng thái từ nút vật lý và dashboard đều có thể yêu cầu bật relay.
   // Khi gas nguy hiểm, relay vẫn luôn được bật để đảm bảo an toàn.
-  bool ventilationOn = localRelayForced || webRelayForced == 1 || gasDanger;
+  bool ventilationOn = localRelayForced || webRelayForced == 1 || gasDanger || humidityDanger;
   digitalWrite(RELAY_THONG_GIO, ventilationOn ? RELAY_ON : RELAY_OFF);
 
   // Còi kêu ngắt quãng khi được bật bằng nút hoặc khi có cảnh báo cảm biến.
@@ -465,6 +472,8 @@ void loop() {
   String alertReason = "An toan";
   if (tempDanger && gasDanger) {
     alertReason = "Nguy hiem: Nhiet do cao va khi gas/khoi vuot nguong";
+  } else if (humidityDanger) {
+    alertReason = "Canh bao: Do am vuot nguong 80%";
   } else if (tempDanger) {
     alertReason = "Canh bao: Nhiet do vuot nguong";
   } else if (gasDanger) {
@@ -487,6 +496,7 @@ void loop() {
     gas,
     tempDanger,
     gasDanger,
+    humidityDanger,
     ventilationOn,
     alertReason
   );
