@@ -21,9 +21,6 @@ const char* buzzerResetUrl = "http://192.168.1.7:3000/api/buzzer/reset";
 #define MQ2_PIN             34       // ADC input-only
 #define BUZZER_PIN          18
 #define RELAY_THONG_GIO    19       // Relay RL2, active LOW
-#define BUTTON_RELAY_PIN   23       // Nút bên phải: bật/tắt relay thông gió
-#define BUTTON_FAN_MAX_PIN 22       // Nút ở giữa: ép quạt chạy tốc độ MAX
-#define BUTTON_BUZZER_PIN  21       // Nút bên trái: bật/tắt còi cảnh báo
 
 // L298: ENA dùng PWM, IN1/IN2 chọn chiều quay
 #define FAN_PWM_PIN         25       // ENA
@@ -64,28 +61,7 @@ unsigned long lastCommandCheck = 0;
 unsigned long lastConfigFetch = 0;
 
 int webRelayForced = 0;  // 0: tự động theo gas, 1: ép bật relay từ Web
-bool localRelayForced = false; // Trạng thái relay do nút vật lý điều khiển
-bool localFanMaxForced = false; // Trạng thái ép quạt MAX do nút vật lý điều khiển
-bool localBuzzerEnabled = false; // Trạng thái còi do nút vật lý điều khiển
 int currentFanSpeed = FAN_SPEED_OFF;
-
-// Trạng thái chống dội cho nút relay.
-const unsigned long buttonDebounceMs = 50;
-int relayButtonLastReading = HIGH;
-int relayButtonStableState = HIGH;
-unsigned long relayButtonLastChange = 0;
-int fanButtonLastReading = HIGH;
-int fanButtonStableState = HIGH;
-unsigned long fanButtonLastChange = 0;
-int buzzerButtonLastReading = HIGH;
-int buzzerButtonStableState = HIGH;
-unsigned long buzzerButtonLastChange = 0;
-
-// Chu kỳ còi ngắt quãng: kêu 250 ms, nghỉ 750 ms.
-const unsigned long buzzerOnDuration = 250;
-const unsigned long buzzerOffDuration = 750;
-unsigned long lastBuzzerToggle = 0;
-bool buzzerOutputState = false;
 
 // Relay active high
 const int RELAY_ON = HIGH;
@@ -144,91 +120,6 @@ String fanLevelName(uint8_t speed) {
 // ======================================================
 void setBuzzer(bool enabled) {
   digitalWrite(BUZZER_PIN, enabled ? HIGH : LOW);
-}
-
-void updateIntermittentBuzzer(bool enabled) {
-  if (!enabled) {
-    buzzerOutputState = false;
-    setBuzzer(false);
-    lastBuzzerToggle = millis();
-    return;
-  }
-
-  unsigned long duration = buzzerOutputState
-                             ? buzzerOnDuration
-                             : buzzerOffDuration;
-
-  if (millis() - lastBuzzerToggle >= duration) {
-    buzzerOutputState = !buzzerOutputState;
-    lastBuzzerToggle = millis();
-    setBuzzer(buzzerOutputState);
-  }
-}
-
-// Cả hai nút đều hoạt động kiểu nhấn một lần để đổi trạng thái.
-void handleButtons() {
-  int relayReading = digitalRead(BUTTON_RELAY_PIN);
-
-  if (relayReading != relayButtonLastReading) {
-    relayButtonLastChange = millis();
-    relayButtonLastReading = relayReading;
-  }
-
-  if (millis() - relayButtonLastChange >= buttonDebounceMs &&
-      relayReading != relayButtonStableState) {
-    relayButtonStableState = relayReading;
-
-    if (relayButtonStableState == LOW) {
-      localRelayForced = !localRelayForced;
-      Serial.printf("[BUTTON] Relay thong gio: %s\n",
-                    localRelayForced ? "ON" : "OFF/AUTO");
-    }
-  }
-
-  int fanReading = digitalRead(BUTTON_FAN_MAX_PIN);
-
-  if (fanReading != fanButtonLastReading) {
-    fanButtonLastChange = millis();
-    fanButtonLastReading = fanReading;
-  }
-
-  if (millis() - fanButtonLastChange >= buttonDebounceMs &&
-      fanReading != fanButtonStableState) {
-    fanButtonStableState = fanReading;
-
-    if (fanButtonStableState == LOW) {
-      localFanMaxForced = !localFanMaxForced;
-      Serial.printf("[BUTTON] Quat MAX: %s\n",
-                    localFanMaxForced ? "ON" : "OFF/AUTO");
-    }
-  }
-
-  int buzzerReading = digitalRead(BUTTON_BUZZER_PIN);
-
-  if (buzzerReading != buzzerButtonLastReading) {
-    buzzerButtonLastChange = millis();
-    buzzerButtonLastReading = buzzerReading;
-  }
-
-  if (millis() - buzzerButtonLastChange >= buttonDebounceMs &&
-      buzzerReading != buzzerButtonStableState) {
-    buzzerButtonStableState = buzzerReading;
-
-    if (buzzerButtonStableState == LOW) {
-      localBuzzerEnabled = !localBuzzerEnabled;
-      if (localBuzzerEnabled) {
-        buzzerOutputState = true;
-        setBuzzer(true);
-        lastBuzzerToggle = millis();
-      } else {
-        buzzerOutputState = false;
-        setBuzzer(false);
-        lastBuzzerToggle = millis();
-      }
-      Serial.printf("[BUTTON] Buzzer: %s\n",
-                    localBuzzerEnabled ? "ON" : "OFF");
-    }
-  }
 }
 
 // ======================================================
@@ -368,9 +259,6 @@ void setup() {
   pinMode(MQ2_PIN, INPUT);
   pinMode(BUZZER_PIN, OUTPUT);
   pinMode(RELAY_THONG_GIO, OUTPUT);
-  pinMode(BUTTON_RELAY_PIN, INPUT_PULLUP);
-  pinMode(BUTTON_FAN_MAX_PIN, INPUT_PULLUP);
-  pinMode(BUTTON_BUZZER_PIN, INPUT_PULLUP);
   pinMode(FAN_IN1_PIN, OUTPUT);
   pinMode(FAN_IN2_PIN, OUTPUT);
 
@@ -403,12 +291,6 @@ void loop() {
     connectWiFi();
   }
 
-  // Đọc nút trước các đoạn return theo chu kỳ cảm biến.
-  handleButtons();
-  // Cập nhật còi thường xuyên để tạo nhịp kêu ngắt quãng mượt.
-  // Cảnh báo cảm biến sẽ được OR thêm sau khi đọc cảm biến.
-  updateIntermittentBuzzer(localBuzzerEnabled);
-
   if (millis() - lastCommandCheck >= commandInterval) {
     lastCommandCheck = millis();
     checkWebCommands();
@@ -439,11 +321,8 @@ void loop() {
   bool gasDanger = gas > gasThreshold;
   bool danger = tempDanger || gasDanger;
 
-  // Nút giữa đổi trạng thái ép quạt chạy mức MAX.
-  // Nhấn lần nữa để trở lại chế độ tự động.
-  if (localFanMaxForced) {
-    setFanSpeed(FAN_SPEED_FAST);
-  } else if (gasDanger || tempDanger) {
+  // Ưu tiên an toàn: gas hoặc nhiệt độ cao thì quạt nhanh.
+  if (gasDanger || tempDanger) {
     setFanSpeed(FAN_SPEED_FAST);
   } else if (temperature < lowTemperature) {
     // Trời lạnh: tắt quạt. Có thể đổi thành FAN_SPEED_SLOW nếu cần.
@@ -454,13 +333,11 @@ void loop() {
 
   // Relay bật khi bị ép từ Web hoặc khi khí gas vượt ngưỡng.
   // webRelayForced = 1 có ưu tiên bật relay, không vô hiệu hóa logic an toàn tự động.
-  // Trạng thái từ nút vật lý và dashboard đều có thể yêu cầu bật relay.
-  // Khi gas nguy hiểm, relay vẫn luôn được bật để đảm bảo an toàn.
-  bool ventilationOn = localRelayForced || webRelayForced == 1 || gasDanger;
+  bool ventilationOn = webRelayForced == 1 || gasDanger;
   digitalWrite(RELAY_THONG_GIO, ventilationOn ? RELAY_ON : RELAY_OFF);
 
-  // Còi kêu ngắt quãng khi được bật bằng nút hoặc khi có cảnh báo cảm biến.
-  updateIntermittentBuzzer(localBuzzerEnabled || danger);
+  // Còi bật khi một trong các chỉ số vượt ngưỡng.
+  setBuzzer(danger);
 
   String alertReason = "An toan";
   if (tempDanger && gasDanger) {
