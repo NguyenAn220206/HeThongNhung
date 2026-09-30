@@ -69,7 +69,7 @@ let sensorData = {
 // ===== CẤU HÌNH NGƯỠNG DO NGƯỜI DÙNG NHẬP =====
 let systemConfig = {
     comfortTemperature: 28.0,
-    gasThreshold: 700
+    gasThreshold: 70
 };
 
 // Biến bộ đệm (cache) để chống spam tin nhắn liên tục lên Telegram

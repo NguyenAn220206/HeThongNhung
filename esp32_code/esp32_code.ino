@@ -9,10 +9,10 @@
 const char* ssid = "F87 Phong Lanh 2.4hz";
 const char* password = "68686868";
 
-const char* serverName = "http://192.168.1.27:3000/api/data";
-const char* configUrl = "http://192.168.1.27:3000/api/config";
-const char* buzzerStatusUrl = "http://192.168.1.27:3000/api/buzzer/status";
-const char* buzzerResetUrl = "http://192.168.1.27:3000/api/buzzer/reset";
+const char* serverName = "http://192.168.1.7:3000/api/data";
+const char* configUrl = "http://192.168.1.7:3000/api/config";
+const char* buzzerStatusUrl = "http://192.168.1.7:3000/api/buzzer/status";
+const char* buzzerResetUrl = "http://192.168.1.7:3000/api/buzzer/reset";
 
 // ======================================================
 // GPIO - KHỚP VỚI SƠ ĐỒ PROTEUS
@@ -48,7 +48,7 @@ const uint8_t FAN_SPEED_FAST = 255;
 // ======================================================
 float comfortTemperature = 28.0;     // Nhiệt độ người dùng cảm thấy dễ chịu
 const float comfortBand = 2.0;       // Tự tạo khoảng T-2 đến T+2
-int gasThreshold = 700;              // Giá trị ADC MQ-2, cần hiệu chỉnh thực tế
+int gasThreshold = 70;              // Giá trị ADC MQ-2, cần hiệu chỉnh thực tế
 
 // ======================================================
 // TIMER / TRẠNG THÁI
