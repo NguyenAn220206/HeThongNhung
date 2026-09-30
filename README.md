@@ -1,72 +1,133 @@
 # Hệ thống giám sát lớp học thông minh
 
-Hệ thống IoT theo dõi môi trường lớp học bằng ESP32 và hiển thị dữ liệu trên dashboard web. Camera được mở trực tiếp trên trình duyệt bằng Web API `getUserMedia`, chỉ dùng để xem hình ảnh và không thực hiện AI, nhận diện người hay lưu video.
+Project IoT theo dõi môi trường lớp học bằng ESP32, cảm biến DHT11/MQ-2 và dashboard web. ESP32 đọc dữ liệu cảm biến, tự điều khiển quạt thông qua L298, relay thông gió và buzzer; backend Node.js tiếp nhận dữ liệu, phát trực tiếp tới dashboard bằng Socket.IO và gửi cảnh báo Telegram.
 
-## Chức năng chính
+Camera chỉ được mở trực tiếp trên trình duyệt bằng `navigator.mediaDevices.getUserMedia()`. Video không đi qua backend và không được lưu trữ.
 
-- Đo nhiệt độ, độ ẩm bằng DHT11.
-- Đo khói/khí gas bằng MQ-2.
-- Tự động điều chỉnh tốc độ quạt theo nhiệt độ.
-- Bật relay quạt thông gió khi khói hoặc khí gas vượt ngưỡng.
-- Bật còi buzzer khi có cảnh báo nguy hiểm.
-- Hiển thị dữ liệu cảm biến theo thời gian thực trên dashboard.
-- Mở camera trực tiếp trên máy đang truy cập dashboard để xem tại chỗ.
-- Nhập ngưỡng nhiệt độ/khí gas và điều khiển còi, relay từ dashboard.
-- Gửi cảnh báo cảm biến qua Telegram.
+> Trạng thái hiện tại: project có firmware ESP32, backend Express/Socket.IO, dashboard web và file mô phỏng Proteus. Chưa có bộ kiểm thử tự động hoặc cơ chế lưu dữ liệu cảm biến lâu dài.
 
-## Kiến trúc hệ thống
+## 1. Chức năng
+
+- Đo nhiệt độ và độ ẩm bằng DHT11.
+- Đo giá trị khói/khí gas dạng analog bằng MQ-2.
+- Tự động điều chỉnh tốc độ quạt theo nhiệt độ và trạng thái cảnh báo.
+- Bật relay quạt thông gió khi phát hiện gas/khói hoặc độ ẩm cao.
+- Phát buzzer ngắt quãng khi có cảnh báo cảm biến.
+- Điều khiển relay và buzzer từ dashboard web.
+- Có ba nút vật lý trên ESP32 tạo thành **Safety Mode**: vẫn điều khiển được relay, quạt và buzzer khi dashboard, backend hoặc kết nối online không tương tác được.
+- Hiển thị dữ liệu gần thời gian thực trên dashboard qua Socket.IO.
+- Ghi lịch sử cảnh báo ở `localStorage` của trình duyệt.
+- Gửi cảnh báo gas, quá nhiệt và cảnh báo từ ESP32 qua Telegram.
+- Mở/tắt camera trực tiếp trên máy đang truy cập dashboard.
+- Hỗ trợ giao diện sáng/tối.
+
+## 2. Kiến trúc
 
 ```text
-DHT11 + MQ-2 + ESP32 ──HTTP/JSON──► Node.js + Express + Socket.IO
-       ▲                                      │
-       │ lệnh cấu hình/điều khiển             │ dữ liệu thời gian thực
-       └──────────────────────────────────────┴──► Dashboard Web
-                                                    │
-                                                    └── Camera trực tiếp bằng getUserMedia
+ DHT11 + MQ-2 + nút vật lý
+             │
+             ▼
+          ESP32
+   ┌─────────┼──────────┐
+   │         │          │
+   │ HTTP    │ HTTP     │ điều khiển
+   ▼         ▼          │
+ POST data  GET config  │
+   └─────────┬──────────┘
+             ▼
+   Node.js + Express + Socket.IO ─────► Telegram
+             │
+             ├── REST API
+             └── Socket.IO ───────────► Dashboard web
+                                           │
+                                           └── Camera local bằng getUserMedia
 ```
 
-Camera chạy cục bộ trong trình duyệt, không truyền qua backend và không được lưu trữ. Trình duyệt sẽ yêu cầu người dùng cấp quyền camera.
+ESP32 gửi dữ liệu cảm biến khoảng mỗi 2 giây, đọc lệnh điều khiển khoảng mỗi 3 giây và lấy cấu hình mới khoảng mỗi 5 giây. Backend lưu trạng thái trong bộ nhớ; khởi động lại server sẽ đưa trạng thái về mặc định.
 
-## Cấu trúc thư mục
+## 3. Cấu trúc thư mục
 
 ```text
 .
-├── backend/                 # Node.js API và Socket.IO server
-│   ├── server.js
-│   └── package.json
-├── frontend/                # Dashboard web và camera trực tiếp
-│   ├── index.html
-│   ├── notifications.html
+├── backend/
+│   ├── server.js             # Express API, Socket.IO và Telegram
+│   ├── package.json
+│   └── package-lock.json
+├── frontend/
+│   ├── index.html            # Dashboard chính
+│   ├── notifications.html    # Lịch sử cảnh báo
 │   └── Assets/
-├── esp32_code/              # Chương trình Arduino cho ESP32
-│   └── esp32_code.ino
-└── project.pdsprj           # Mô phỏng Proteus
+│       ├── css/
+│       └── js/app.js
+├── esp32_code/
+│   └── esp32_code.ino        # Firmware ESP32 chính
+├── backupcode/
+│   └── esp32_code.ino        # Bản firmware dự phòng
+├── project.pdsprj           # Mô phỏng Proteus
+├── Project Backups/          # Các bản autosave/backup Proteus
+└── Mô tả.txt                 # Mô tả ý tưởng ban đầu
 ```
 
-## Phần cứng và chân kết nối ESP32
+## 4. Phần cứng và sơ đồ chân
 
-| Thiết bị | GPIO |
+| Thiết bị/chức năng | GPIO ESP32 | Ghi chú |
+|---|---:|---|
+| DHT11 | 4 | Dữ liệu nhiệt độ/độ ẩm |
+| MQ-2 | 34 | ADC, chân input-only |
+| Buzzer | 18 | Xuất tín hiệu buzzer |
+| Relay thông gió | 19 | Firmware hiện tại: `HIGH` là bật |
+| Nút relay | 23 | `INPUT_PULLUP`, nhấn để đổi trạng thái |
+| Nút quạt MAX | 22 | `INPUT_PULLUP`, nhấn để ép quạt chạy nhanh |
+| Nút buzzer | 21 | `INPUT_PULLUP`, nhấn để bật/tắt buzzer |
+| L298 ENA/PWM | 25 | PWM tốc độ quạt |
+| L298 IN1 | 26 | Chiều quay |
+| L298 IN2 | 27 | Chiều quay |
+
+### Mức quạt
+
+| Mức | PWM |
 |---|---:|
-| DHT11 | GPIO 4 |
-| MQ-2 (ADC) | GPIO 34 |
-| Buzzer | GPIO 18 |
-| Relay quạt thông gió | GPIO 19 |
-| L298 ENA / PWM quạt | GPIO 25 |
-| L298 IN1 | GPIO 26 |
-| L298 IN2 | GPIO 27 |
+| Tắt | 0 |
+| Chậm | 90 |
+| Bình thường | 170 |
+| Nhanh/MAX | 255 |
 
-Relay quạt thông gió được cấu hình active-LOW. Ngưỡng mặc định là 28°C cho nhiệt độ tiện nghi và 700 cho giá trị ADC của MQ-2; các ngưỡng này có thể thay đổi từ dashboard.
+## 5. Logic điều khiển
 
-## Yêu cầu môi trường
+- Nhiệt độ dễ chịu mặc định: `28.0°C`.
+- Dải nhiệt độ bình thường: `comfortTemperature - 2` đến `comfortTemperature + 2`.
+- Ngưỡng MQ-2 mặc định: `70` theo thang ADC của firmware hiện tại; cần hiệu chỉnh theo cảm biến thực tế.
+- Ngưỡng độ ẩm cao: `80%`.
+- Khi nhiệt độ thấp hơn dải bình thường: quạt tắt.
+- Khi nhiệt độ nằm trong dải bình thường: quạt chạy mức bình thường.
+- Khi nhiệt độ, gas hoặc độ ẩm vượt ngưỡng: quạt chạy nhanh và buzzer cảnh báo.
+- Relay thông gió bật khi gas/độ ẩm vượt ngưỡng hoặc relay bị ép bật từ nút vật lý/dashboard.
+- Nút quạt MAX có ưu tiên cao hơn logic tốc độ tự động.
+- Lệnh buzzer từ dashboard tạo một chuỗi buzzer từ xa, sau đó ESP32 báo backend reset cờ lệnh.
 
-- Node.js 18 trở lên và npm.
-- ESP32, Arduino IDE hoặc PlatformIO.
-- Trình duyệt hỗ trợ `getUserMedia` như Chrome, Edge hoặc Firefox.
-- Camera USB hoặc camera tích hợp.
+### Safety Mode – điều khiển dự phòng tại chỗ
 
-## Cài đặt và chạy
+Safety Mode là nhóm nút chức năng vật lý trên ESP32, giúp người dùng vẫn xử lý được tình huống khẩn cấp khi tương tác online không hoạt động, chẳng hạn dashboard mất kết nối, backend dừng hoặc mạng LAN gặp sự cố. Các nút được xử lý trực tiếp trên ESP32 và không phụ thuộc vào frontend hay API:
 
-### 1. Khởi động backend
+- **Nút relay (GPIO 23):** nhấn để bật/tắt yêu cầu relay thông gió tại chỗ. Khi có cảnh báo gas, logic an toàn tự động vẫn ưu tiên bật relay.
+- **Nút quạt MAX (GPIO 22):** nhấn để ép quạt chạy tốc độ tối đa; nhấn lần nữa để quay lại chế độ tự động.
+- **Nút buzzer (GPIO 21):** nhấn để bật/tắt buzzer thủ công tại chỗ.
+
+Vì các nút này hoạt động độc lập với đường truyền online, đây là phương án dự phòng để duy trì khả năng can thiệp trực tiếp vào thiết bị khi dashboard hoặc backend không phản hồi.
+
+## 6. Yêu cầu môi trường
+
+- Node.js 18+ và npm.
+- Arduino IDE hoặc PlatformIO.
+- Board ESP32 tương thích.
+- Các thư viện Arduino: `WiFi`, `HTTPClient`, `DHT`, `ArduinoJson`.
+- Trình duyệt hiện đại hỗ trợ Fetch, WebSocket và `getUserMedia`.
+- Camera USB/tích hợp nếu cần dùng tính năng camera.
+- ESP32 và máy chạy backend phải cùng mạng LAN.
+
+## 7. Cài đặt và chạy
+
+### 7.1. Chạy backend
 
 ```bash
 cd backend
@@ -74,61 +135,127 @@ npm install
 node server.js
 ```
 
-Server mặc định chạy tại `http://localhost:3000`.
+Backend lắng nghe tại `http://localhost:3000`. Có thể mở URL này trên trình duyệt để kiểm tra; server sẽ trả về `IoT Backend Running`.
 
-### 2. Chạy dashboard
+### 7.2. Chạy frontend
 
-Mở thư mục `frontend` bằng một static server, ví dụ VS Code Live Server, sau đó mở `index.html` trên trình duyệt.
+Không nên mở HTML bằng `file://`, đặc biệt khi dùng camera. Hãy chạy static server trong thư mục `frontend`, ví dụ:
 
-Nhấn **BẬT CAMERA** và cấp quyền camera khi được hỏi. Camera thường chỉ hoạt động trên `localhost` hoặc kết nối HTTPS; mở file HTML trực tiếp bằng `file://` có thể bị trình duyệt chặn.
+```bash
+cd frontend
+npx serve .
+```
 
-Nếu backend chạy trên máy khác, cập nhật biến `BASE_URL` trong `frontend/Assets/js/app.js` và các URL API tương ứng.
+Sau đó mở URL do lệnh trả về. Nếu static server dùng cùng cổng `3000` với backend, hãy đổi một trong hai cổng để tránh xung đột.
 
-### 3. Nạp chương trình cho ESP32
+Frontend mặc định kết nối tới `http://localhost:3000`. Nếu backend chạy ở máy hoặc cổng khác, cập nhật `BASE_URL` trong:
+
+- `frontend/Assets/js/app.js`
+- `frontend/notifications.html`
+
+Camera thường chỉ hoạt động trên `localhost` hoặc HTTPS. Khi được hỏi, cấp quyền camera rồi bấm **BẬT CAMERA**.
+
+### 7.3. Nạp firmware ESP32
 
 1. Mở `esp32_code/esp32_code.ino` bằng Arduino IDE.
-2. Cài board ESP32 và các thư viện `WiFi`, `HTTPClient`, `DHT`, `ArduinoJson`.
-3. Cập nhật SSID, mật khẩu Wi-Fi và địa chỉ IP của backend trong file `.ino`.
-4. Kiểm tra sơ đồ nối dây, chọn đúng board/COM port rồi nạp chương trình.
+2. Cài board ESP32 và các thư viện cần thiết.
+3. Cập nhật `ssid`, `password` và các URL backend ở đầu file `.ino`.
+4. Đảm bảo địa chỉ backend là địa chỉ LAN mà ESP32 truy cập được; không dùng `localhost` trên ESP32.
+5. Kiểm tra dây nối theo bảng GPIO.
+6. Chọn đúng board và cổng COM, sau đó nạp chương trình.
+7. Mở Serial Monitor ở baud rate `115200` để theo dõi Wi-Fi, cảm biến và mã HTTP.
 
-ESP32 phải truy cập được máy chạy backend trong cùng mạng LAN.
+## 8. API backend
 
-## API chính
+### Dữ liệu cảm biến
 
 | Phương thức | Endpoint | Mục đích |
 |---|---|---|
-| `GET` | `/api/data` | Lấy dữ liệu cảm biến hiện tại |
+| `GET` | `/api/data` | Lấy dữ liệu cảm biến mới nhất |
 | `POST` | `/api/data` | ESP32 gửi dữ liệu cảm biến |
-| `GET` | `/api/config` | Lấy cấu hình ngưỡng |
-| `POST` | `/api/config` | Cập nhật nhiệt độ tiện nghi và ngưỡng gas |
-| `POST` | `/api/buzzer/trigger` | Kích hoạt còi từ dashboard |
-| `POST` | `/api/relay/toggle` | Chuyển relay giữa chế độ ép bật/tự động |
-| `GET` | `/api/relay/status` | Đọc trạng thái ép bật/tự động của relay |
-| `POST` | `/api/clear-all` | Xóa lịch sử thông báo trên các dashboard |
 
-Luồng camera không sử dụng API backend; video được lấy trực tiếp từ thiết bị camera bằng `navigator.mediaDevices.getUserMedia()`.
+Payload chính do ESP32 gửi gồm `temperature`, `humidity`, `gas`, `gasThreshold`, `humidityThreshold`, `comfortTemperature`, `tempLow`, `tempHigh`, các cờ cảnh báo, `alertReason`, `fanSpeed`, `fanLevel` và `thongGio`.
 
-## Luồng cảnh báo
+### Cấu hình
 
-1. ESP32 đọc DHT11 và MQ-2 theo chu kỳ.
-2. ESP32 điều khiển quạt, relay và buzzer theo các ngưỡng.
-3. Dữ liệu được gửi tới backend bằng JSON.
-4. Backend phát dữ liệu tới dashboard qua Socket.IO và gửi Telegram khi có cảnh báo.
-5. Người dùng xem camera trực tiếp tại dashboard nếu đã cấp quyền.
+| Phương thức | Endpoint | Mục đích |
+|---|---|---|
+| `GET` | `/api/config` | Đọc `comfortTemperature` và `gasThreshold` |
+| `POST` | `/api/config` | Cập nhật ngưỡng |
 
-## Lưu ý bảo mật
+Giới hạn backend: `comfortTemperature` từ `10` đến `45°C`; `gasThreshold` từ `1` đến `4095`.
 
-Không đưa Wi-Fi password, Telegram bot token/chat ID hoặc địa chỉ IP nội bộ lên repository công khai. Các thông tin này hiện cần được chuyển sang biến môi trường hoặc file cấu hình không commit; Telegram token đã từng xuất hiện trong mã nguồn nên cần thu hồi và tạo token mới.
+Ví dụ:
 
-Các API điều khiển relay, buzzer và xóa lịch sử hiện chưa có xác thực, chỉ nên sử dụng trong mạng tin cậy.
+```json
+{
+  "comfortTemperature": 28,
+  "gasThreshold": 70
+}
+```
 
-## Hướng phát triển
+### Điều khiển
 
-- Đưa toàn bộ cấu hình và thông tin nhạy cảm ra biến môi trường.
-- Thêm xác thực cho API điều khiển thiết bị.
-- Lưu dữ liệu cảm biến vào cơ sở dữ liệu để vẽ biểu đồ lịch sử.
-- Thêm Docker Compose và kiểm thử API.
+| Phương thức | Endpoint | Mục đích |
+|---|---|---|
+| `POST` | `/api/buzzer/trigger` | Yêu cầu ESP32 phát buzzer từ xa và gửi Telegram |
+| `GET` | `/api/buzzer/status` | ESP32 đọc cờ buzzer và trạng thái relay web |
+| `POST` | `/api/buzzer/reset` | ESP32 xóa cờ buzzer sau khi xử lý |
+| `POST` | `/api/relay/set` | Đặt relay web: `relayState` là `0` hoặc `1` |
+| `POST` | `/api/relay/toggle` | Đảo giữa chế độ tự động và ép bật relay |
+| `GET` | `/api/relay/status` | Đọc trạng thái relay web |
+| `POST` | `/api/clear-all` | Phát sự kiện xóa lịch sử tới các dashboard đang kết nối |
 
-## Link Github Sản phẩm
+`relayState = 0` đưa relay về chế độ tự động; `relayState = 1` yêu cầu ESP32 ép bật relay. Lịch sử cảnh báo thực tế nằm trong `localStorage` từng trình duyệt; `/api/clear-all` đồng bộ yêu cầu xóa giữa các dashboard đang mở.
 
-NguyenAn220206 — [repository HeThongNhung](https://github.com/NguyenAn220206/HeThongNhung)
+## 9. Socket.IO
+
+Frontend kết nối Socket.IO tới `BASE_URL` và sử dụng các sự kiện:
+
+| Sự kiện | Hướng | Ý nghĩa |
+|---|---|---|
+| `sensor-data` | Backend → frontend | Dữ liệu cảm biến mới nhất |
+| `system-config` | Backend → frontend | Cấu hình vừa được cập nhật |
+| `history-cleared` | Backend → frontend | Yêu cầu xóa lịch sử cảnh báo |
+
+## 10. Mô phỏng Proteus
+
+Mở `project.pdsprj` bằng Proteus phiên bản tương thích để xem mạch mô phỏng. Khi chạy mô phỏng, cần kiểm tra lại model linh kiện, baud rate, kết nối UART/Wi-Fi giả lập và mức logic relay vì hành vi mô phỏng có thể khác phần cứng thật.
+
+## 11. Xử lý lỗi thường gặp
+
+| Hiện tượng | Kiểm tra |
+|---|---|
+| Dashboard không có dữ liệu | Backend đã chạy chưa, `BASE_URL` đúng chưa, Console trình duyệt có lỗi CORS/WebSocket không |
+| ESP32 không gửi được dữ liệu | ESP32 cùng LAN chưa, URL đúng IP backend chưa, firewall có chặn cổng `3000` không |
+| Camera không mở | Đang dùng `localhost`/HTTPS chưa, đã cấp quyền chưa, camera có bị ứng dụng khác chiếm không |
+| Gas báo sai | MQ-2 cần thời gian làm nóng và cần hiệu chuẩn ngưỡng theo môi trường thực tế |
+| Relay chạy ngược | Kiểm tra module relay và chỉnh `RELAY_ON`/`RELAY_OFF` trong firmware |
+| DHT11 lỗi | Kiểm tra nguồn, điện trở kéo lên, dây DATA và khoảng thời gian đọc cảm biến |
+| Không có Telegram | Kiểm tra Internet của backend, bot token/chat ID và log server |
+
+## 12. Bảo mật và giới hạn hiện tại
+
+Project hiện phù hợp cho thử nghiệm trong mạng tin cậy, chưa phù hợp để đưa trực tiếp lên Internet:
+
+- Wi-Fi và thông tin Telegram đang khai báo trực tiếp trong mã nguồn; cần chuyển sang cấu hình riêng/biến môi trường và không commit thông tin thật.
+- Nếu thông tin đã từng được đẩy lên Git hoặc chia sẻ, cần thu hồi mật khẩu Wi-Fi và tạo lại Telegram bot token.
+- API điều khiển relay, buzzer và xóa lịch sử chưa có xác thực.
+- CORS backend đang cho phép mọi origin (`*`).
+- Dữ liệu cảm biến và cấu hình chỉ lưu trong RAM, không có database.
+- Frontend sử dụng `innerHTML` cho một số nội dung; nếu mở rộng nguồn dữ liệu, cần thêm xử lý chống XSS.
+- Chưa có HTTPS, rate limiting, logging tập trung hoặc kiểm thử tự động.
+
+## 13. Hướng phát triển
+
+1. Đưa Wi-Fi, Telegram và địa chỉ backend ra file cấu hình/biến môi trường.
+2. Thêm xác thực và phân quyền cho API điều khiển.
+3. Giới hạn CORS theo domain dashboard.
+4. Lưu lịch sử cảm biến và cảnh báo vào database để vẽ biểu đồ.
+5. Thêm Docker Compose, health check và test API.
+6. Hiệu chuẩn MQ-2, kiểm thử relay active-high/active-low và kiểm thử với phần cứng thật.
+7. Thêm trạng thái mất kết nối ESP32/backend rõ ràng hơn trên dashboard.
+
+## 14. Liên kết repository
+
+[NguyenAn220206/HeThongNhung](https://github.com/NguyenAn220206/HeThongNhung)
