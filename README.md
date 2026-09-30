@@ -113,7 +113,7 @@ Safety Mode là nhóm nút chức năng vật lý trên ESP32, giúp người d�
 - **Nút quạt MAX (GPIO 22):** nhấn để ép quạt chạy tốc độ tối đa; nhấn lần nữa để quay lại chế độ tự động.
 - **Nút buzzer (GPIO 21):** nhấn để bật/tắt buzzer thủ công tại chỗ.
 
-Vì các nút này hoạt động độc lập với đường truyền online, đây là phương án dự phòng để duy trì khả năng can thiệp trực tiếp vào thiết bị khi dashboard hoặc backend không phản hồi.
+Firmware ghi nhận các lần nhấn bằng GPIO interrupt và không chờ Wi-Fi đồng bộ, nên các nút vẫn có thể sử dụng khi mạng yếu hoặc chập chờn. Đây là phương án dự phòng để duy trì khả năng can thiệp trực tiếp vào thiết bị khi dashboard hoặc backend không phản hồi.
 
 ## 6. Yêu cầu môi trường
 

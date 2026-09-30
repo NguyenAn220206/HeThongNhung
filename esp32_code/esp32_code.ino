@@ -6,13 +6,13 @@
 // ======================================================
 // WIFI / BACKEND
 // ======================================================
-const char* ssid = "F87 Phong Lanh 2.4hz";
-const char* password = "68686868";
+const char* ssid = "ai phôn nèee nhaaaa";
+const char* password = "nguyenan2202";
 
-const char* serverName = "http://192.168.1.7:3000/api/data";
-const char* configUrl = "http://192.168.1.7:3000/api/config";
-const char* buzzerStatusUrl = "http://192.168.1.7:3000/api/buzzer/status";
-const char* buzzerResetUrl = "http://192.168.1.7:3000/api/buzzer/reset";
+const char* serverName = "http://172.20.10.2:3000/api/data";
+const char* configUrl = "http://172.20.10.2:3000/api/config";
+const char* buzzerStatusUrl = "http://172.20.10.2:3000/api/buzzer/status";
+const char* buzzerResetUrl = "http://172.20.10.2:3000/api/buzzer/reset";
 
 // ======================================================
 // GPIO - KHỚP VỚI SƠ ĐỒ PROTEUS
@@ -20,7 +20,7 @@ const char* buzzerResetUrl = "http://192.168.1.7:3000/api/buzzer/reset";
 #define DHT_PIN             4
 #define MQ2_PIN             34       // ADC input-only
 #define BUZZER_PIN          18
-#define RELAY_THONG_GIO    19       // Relay RL2, active LOW
+#define RELAY_THONG_GIO    19       // Relay RL2, active HIGH theo firmware hiện tại
 #define BUTTON_RELAY_PIN   23       // Nút bên phải: bật/tắt relay thông gió
 #define BUTTON_FAN_MAX_PIN 22       // Nút ở giữa: ép quạt chạy tốc độ MAX
 #define BUTTON_BUZZER_PIN  21       // Nút bên trái: bật/tắt còi cảnh báo
@@ -71,17 +71,14 @@ bool localBuzzerEnabled = false; // Trạng thái còi do nút vật lý điều
 bool sensorDangerActive = false; // Cảnh báo cảm biến được giữ giữa các vòng lặp
 int currentFanSpeed = FAN_SPEED_OFF;
 
-// Trạng thái chống dội cho nút relay.
-const unsigned long buttonDebounceMs = 50;
-int relayButtonLastReading = HIGH;
-int relayButtonStableState = HIGH;
-unsigned long relayButtonLastChange = 0;
-int fanButtonLastReading = HIGH;
-int fanButtonStableState = HIGH;
-unsigned long fanButtonLastChange = 0;
-int buzzerButtonLastReading = HIGH;
-int buzzerButtonStableState = HIGH;
-unsigned long buzzerButtonLastChange = 0;
+// Cờ sự kiện nút được ghi nhận bằng interrupt để không bị mất khi mạng chậm.
+volatile bool relayButtonPressed = false;
+volatile bool fanButtonPressed = false;
+volatile bool buzzerButtonPressed = false;
+volatile unsigned long lastRelayInterruptUs = 0;
+volatile unsigned long lastFanInterruptUs = 0;
+volatile unsigned long lastBuzzerInterruptUs = 0;
+const unsigned long buttonDebounceUs = 200000; // 200 ms
 
 // Chu kỳ còi ngắt quãng: kêu 250 ms, nghỉ 750 ms.
 const unsigned long buzzerOnDuration = 250;
@@ -96,25 +93,113 @@ const int RELAY_OFF = LOW;
 // ======================================================
 // WIFI
 // ======================================================
+const unsigned long wifiRetryInterval = 5000;
+const unsigned long wifiAttemptTimeout = 20000;
+unsigned long lastWifiAttempt = 0;
+unsigned long wifiAttemptStartedAt = 0;
+bool wifiAttemptInProgress = false;
+
+void IRAM_ATTR onRelayButtonPressed() {
+  const unsigned long nowUs = micros();
+  if (nowUs - lastRelayInterruptUs >= buttonDebounceUs) {
+    relayButtonPressed = true;
+    lastRelayInterruptUs = nowUs;
+  }
+}
+
+void IRAM_ATTR onFanButtonPressed() {
+  const unsigned long nowUs = micros();
+  if (nowUs - lastFanInterruptUs >= buttonDebounceUs) {
+    fanButtonPressed = true;
+    lastFanInterruptUs = nowUs;
+  }
+}
+
+void IRAM_ATTR onBuzzerButtonPressed() {
+  const unsigned long nowUs = micros();
+  if (nowUs - lastBuzzerInterruptUs >= buttonDebounceUs) {
+    buzzerButtonPressed = true;
+    lastBuzzerInterruptUs = nowUs;
+  }
+}
+
 void connectWiFi() {
-  if (WiFi.status() == WL_CONNECTED) return;
+  const unsigned long now = millis();
 
-  WiFi.begin(ssid, password);
-  Serial.print("Connecting WiFi");
-
-  unsigned long start = millis();
-  while (WiFi.status() != WL_CONNECTED && millis() - start < 20000) {
-    delay(500);
-    Serial.print(".");
+  if (WiFi.status() == WL_CONNECTED) {
+    if (wifiAttemptInProgress) {
+      Serial.println("WiFi Connected");
+      Serial.print("ESP32 IP: ");
+      Serial.println(WiFi.localIP());
+    }
+    wifiAttemptInProgress = false;
+    return;
   }
 
-  Serial.println();
-  if (WiFi.status() == WL_CONNECTED) {
-    Serial.println("WiFi Connected");
-    Serial.print("ESP32 IP: ");
-    Serial.println(WiFi.localIP());
-  } else {
-    Serial.println("WiFi connection timeout");
+  // Không chờ đồng bộ ở đây: các nút vật lý vẫn được xử lý trong lúc Wi-Fi kết nối.
+  if (wifiAttemptInProgress) {
+    if (now - wifiAttemptStartedAt >= wifiAttemptTimeout) {
+      Serial.println("WiFi connection timeout; retrying later");
+      WiFi.disconnect();
+      wifiAttemptInProgress = false;
+    }
+    return;
+  }
+
+  if (lastWifiAttempt != 0 && now - lastWifiAttempt < wifiRetryInterval) {
+    return;
+  }
+
+  lastWifiAttempt = now;
+  wifiAttemptStartedAt = now;
+  wifiAttemptInProgress = true;
+  WiFi.begin(ssid, password);
+  Serial.println("Connecting WiFi in background...");
+}
+
+void logButtonAction(const char* name, bool enabled) {
+  Serial.printf("[BUTTON] %s: %s\n", name, enabled ? "ON" : "OFF/AUTO");
+}
+
+void setBuzzer(bool enabled);
+
+// Các nút được xử lý nhanh ở local, không phụ thuộc backend/Wi-Fi.
+void handleButtons() {
+  bool relayPressed = false;
+  bool fanPressed = false;
+  bool buzzerPressed = false;
+
+  noInterrupts();
+  relayPressed = relayButtonPressed;
+  fanPressed = fanButtonPressed;
+  buzzerPressed = buzzerButtonPressed;
+  relayButtonPressed = false;
+  fanButtonPressed = false;
+  buzzerButtonPressed = false;
+  interrupts();
+
+  if (relayPressed) {
+    localRelayForced = !localRelayForced;
+    logButtonAction("Relay thong gio", localRelayForced);
+  }
+
+  if (fanPressed) {
+    localFanMaxForced = !localFanMaxForced;
+    logButtonAction("Quat MAX", localFanMaxForced);
+  }
+
+  if (buzzerPressed) {
+    localBuzzerEnabled = !localBuzzerEnabled;
+    if (localBuzzerEnabled) {
+      buzzerOutputState = true;
+      setBuzzer(true);
+      lastBuzzerToggle = millis();
+    } else {
+      buzzerOutputState = false;
+      setBuzzer(false);
+      lastBuzzerToggle = millis();
+    }
+    logButtonAction("Buzzer", localBuzzerEnabled);
   }
 }
 
@@ -167,72 +252,6 @@ void updateIntermittentBuzzer(bool enabled) {
   }
 }
 
-// Cả hai nút đều hoạt động kiểu nhấn một lần để đổi trạng thái.
-void handleButtons() {
-  int relayReading = digitalRead(BUTTON_RELAY_PIN);
-
-  if (relayReading != relayButtonLastReading) {
-    relayButtonLastChange = millis();
-    relayButtonLastReading = relayReading;
-  }
-
-  if (millis() - relayButtonLastChange >= buttonDebounceMs &&
-      relayReading != relayButtonStableState) {
-    relayButtonStableState = relayReading;
-
-    if (relayButtonStableState == LOW) {
-      localRelayForced = !localRelayForced;
-      Serial.printf("[BUTTON] Relay thong gio: %s\n",
-                    localRelayForced ? "ON" : "OFF/AUTO");
-    }
-  }
-
-  int fanReading = digitalRead(BUTTON_FAN_MAX_PIN);
-
-  if (fanReading != fanButtonLastReading) {
-    fanButtonLastChange = millis();
-    fanButtonLastReading = fanReading;
-  }
-
-  if (millis() - fanButtonLastChange >= buttonDebounceMs &&
-      fanReading != fanButtonStableState) {
-    fanButtonStableState = fanReading;
-
-    if (fanButtonStableState == LOW) {
-      localFanMaxForced = !localFanMaxForced;
-      Serial.printf("[BUTTON] Quat MAX: %s\n",
-                    localFanMaxForced ? "ON" : "OFF/AUTO");
-    }
-  }
-
-  int buzzerReading = digitalRead(BUTTON_BUZZER_PIN);
-
-  if (buzzerReading != buzzerButtonLastReading) {
-    buzzerButtonLastChange = millis();
-    buzzerButtonLastReading = buzzerReading;
-  }
-
-  if (millis() - buzzerButtonLastChange >= buttonDebounceMs &&
-      buzzerReading != buzzerButtonStableState) {
-    buzzerButtonStableState = buzzerReading;
-
-    if (buzzerButtonStableState == LOW) {
-      localBuzzerEnabled = !localBuzzerEnabled;
-      if (localBuzzerEnabled) {
-        buzzerOutputState = true;
-        setBuzzer(true);
-        lastBuzzerToggle = millis();
-      } else {
-        buzzerOutputState = false;
-        setBuzzer(false);
-        lastBuzzerToggle = millis();
-      }
-      Serial.printf("[BUTTON] Buzzer: %s\n",
-                    localBuzzerEnabled ? "ON" : "OFF");
-    }
-  }
-}
-
 // ======================================================
 // GỬI DỮ LIỆU LÊN BACKEND
 // ======================================================
@@ -250,6 +269,8 @@ void sendSensorData(
 
   HTTPClient http;
   http.begin(serverName);
+  http.setConnectTimeout(1000);
+  http.setTimeout(1500);
   http.addHeader("Content-Type", "application/json");
 
   StaticJsonDocument<768> doc;
@@ -289,6 +310,8 @@ void resetBuzzerOnServer() {
 
   HTTPClient http;
   http.begin(buzzerResetUrl);
+  http.setConnectTimeout(1000);
+  http.setTimeout(1500);
   http.addHeader("Content-Type", "application/json");
   http.POST("{}");
   http.end();
@@ -299,6 +322,8 @@ void fetchSystemConfig() {
 
   HTTPClient http;
   http.begin(configUrl);
+  http.setConnectTimeout(1000);
+  http.setTimeout(1500);
   int responseCode = http.GET();
 
   if (responseCode > 0) {
@@ -339,6 +364,8 @@ void checkWebCommands() {
 
   HTTPClient http;
   http.begin(buzzerStatusUrl);
+  http.setConnectTimeout(1000);
+  http.setTimeout(1500);
   int responseCode = http.GET();
 
   if (responseCode > 0) {
@@ -370,12 +397,17 @@ void checkWebCommands() {
 void setup() {
   Serial.begin(115200);
 
+  WiFi.mode(WIFI_STA);
+
   pinMode(MQ2_PIN, INPUT);
   pinMode(BUZZER_PIN, OUTPUT);
   pinMode(RELAY_THONG_GIO, OUTPUT);
   pinMode(BUTTON_RELAY_PIN, INPUT_PULLUP);
   pinMode(BUTTON_FAN_MAX_PIN, INPUT_PULLUP);
   pinMode(BUTTON_BUZZER_PIN, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(BUTTON_RELAY_PIN), onRelayButtonPressed, FALLING);
+  attachInterrupt(digitalPinToInterrupt(BUTTON_FAN_MAX_PIN), onFanButtonPressed, FALLING);
+  attachInterrupt(digitalPinToInterrupt(BUTTON_BUZZER_PIN), onBuzzerButtonPressed, FALLING);
   pinMode(FAN_IN1_PIN, OUTPUT);
   pinMode(FAN_IN2_PIN, OUTPUT);
 
