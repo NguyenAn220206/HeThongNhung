@@ -20,7 +20,7 @@ const char* buzzerResetUrl = "http://172.20.10.2:3000/api/buzzer/reset";
 #define DHT_PIN             4
 #define MQ2_PIN             34       // ADC input-only
 #define BUZZER_PIN          18
-#define RELAY_THONG_GIO    19       // Relay RL2, active HIGH theo firmware hiện tại
+#define RELAY_THONG_GIO    19       // Relay RL2, active HIGH 
 #define BUTTON_RELAY_PIN   23       // Nút bên phải: bật/tắt relay thông gió
 #define BUTTON_FAN_MAX_PIN 22       // Nút ở giữa: ép quạt chạy tốc độ MAX
 #define BUTTON_BUZZER_PIN  21       // Nút bên trái: bật/tắt còi cảnh báo
