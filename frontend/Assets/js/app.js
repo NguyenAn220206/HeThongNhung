@@ -143,7 +143,7 @@ function applyConfigToForm(config) {
     }
     if (range && config.comfortTemperature !== undefined) {
         const comfort = Number(config.comfortTemperature);
-        range.textContent = `Khoảng quạt: ${(comfort - 2).toFixed(1)}–${(comfort + 2).toFixed(1)}°C`;
+        range.textContent = `Khoảng quạt: ${(comfort - 3).toFixed(1)}–${(comfort + 3).toFixed(1)}°C`;
     }
 }
 

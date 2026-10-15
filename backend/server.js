@@ -68,8 +68,8 @@ let sensorData = {
 
 // ===== CẤU HÌNH NGƯỠNG DO NGƯỜI DÙNG NHẬP =====
 let systemConfig = {
-    comfortTemperature: 28.0,
-    gasThreshold: 70
+    comfortTemperature: 30.0,
+    gasThreshold: 100
 };
 
 // Biến bộ đệm (cache) để chống spam tin nhắn liên tục lên Telegram
@@ -108,7 +108,7 @@ app.post("/api/data", (req, res) => {
     const timeString = sensorData.updatedAt.toLocaleTimeString();
 
     const gasLimit = Number(sensorData.gasThreshold ?? systemConfig.gasThreshold);
-    const temperatureLimit = Number(sensorData.tempHigh ?? (systemConfig.comfortTemperature + 2));
+    const temperatureLimit = Number(sensorData.tempHigh ?? (systemConfig.comfortTemperature + 3));
 
     // 1. Gửi cảnh báo Khí Gas vượt ngưỡng cấu hình
     if (sensorData.gas > gasLimit) {
@@ -121,7 +121,7 @@ app.post("/api/data", (req, res) => {
         isGasAlertSent = false;
     }
 
-    // 2. Gửi cảnh báo Nhiệt độ vượt T dễ chịu + 2°C
+    // 2. Gửi cảnh báo Nhiệt độ vượt T dễ chịu + 3°C
     if (sensorData.temperature > temperatureLimit) {
         console.log("[ALERT] CANH BAO NHIET DO! Thiết bị quá nóng.");
         if (!isTempAlertSent) {

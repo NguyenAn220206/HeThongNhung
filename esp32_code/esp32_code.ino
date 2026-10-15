@@ -2,6 +2,9 @@
 #include <HTTPClient.h>
 #include <DHT.h>
 #include <ArduinoJson.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+#include "LocalControls.h"
 
 // ======================================================
 // WIFI / BACKEND
@@ -40,18 +43,13 @@ const int FAN_PWM_CHANNEL = 0;
 const int FAN_PWM_FREQUENCY = 5000;
 const int FAN_PWM_RESOLUTION = 8;    // 0..255
 
-const uint8_t FAN_SPEED_OFF = 0;
-const uint8_t FAN_SPEED_SLOW = 90;
-const uint8_t FAN_SPEED_NORMAL = 170;
-const uint8_t FAN_SPEED_FAST = 255;
-
 // ======================================================
 // NGƯỠNG MẶC ĐỊNH
 // Có thể thay đổi sau khi bổ sung API nhận cấu hình từ frontend.
 // ======================================================
-float comfortTemperature = 28.0;     // Nhiệt độ người dùng cảm thấy dễ chịu
-const float comfortBand = 2.0;       // Tự tạo khoảng T-2 đến T+2
-int gasThreshold = 70;              // Giá trị ADC MQ-2, cần hiệu chỉnh thực tế
+float comfortTemperature = 30.0;     // Nhiệt độ người dùng cảm thấy dễ chịu
+const float comfortBand = 3.0;       // Tự tạo khoảng T-3 đến T+3
+int gasThreshold = 100;              // Giá trị ADC MQ-2, cần hiệu chỉnh thực tế
 const float humidityThreshold = 80.0; // Ngưỡng độ ẩm cao (%)
 
 // ======================================================
@@ -64,27 +62,31 @@ unsigned long lastSensorSend = 0;
 unsigned long lastCommandCheck = 0;
 unsigned long lastConfigFetch = 0;
 
-int webRelayForced = 0;  // 0: tự động theo gas, 1: ép bật relay từ Web
-bool localRelayForced = false; // Trạng thái relay do nút vật lý điều khiển
-bool localFanMaxForced = false; // Trạng thái ép quạt MAX do nút vật lý điều khiển
-bool localBuzzerEnabled = false; // Trạng thái còi do nút vật lý điều khiển
-bool sensorDangerActive = false; // Cảnh báo cảm biến được giữ giữa các vòng lặp
-int currentFanSpeed = FAN_SPEED_OFF;
+// HTTP chạy trong loop; task riêng xử lý nút và đầu ra, không chờ mạng.
+portMUX_TYPE controlMux = portMUX_INITIALIZER_UNLOCKED;
+ControlInputs controlInputs;
+ControlOutputs controlOutputs;
+TaskHandle_t controlTaskHandle = nullptr;
+uint32_t sensorVersion = 0;
+uint32_t appliedSensorVersion = 0;
+enum RemoteBuzzerCommand { REMOTE_IDLE, REMOTE_REQUESTED, REMOTE_ACTIVE, REMOTE_FINISHED };
+RemoteBuzzerCommand remoteBuzzerCommand = REMOTE_IDLE;
 
-// Cờ sự kiện nút được ghi nhận bằng interrupt để không bị mất khi mạng chậm.
-volatile bool relayButtonPressed = false;
-volatile bool fanButtonPressed = false;
-volatile bool buzzerButtonPressed = false;
-volatile unsigned long lastRelayInterruptUs = 0;
-volatile unsigned long lastFanInterruptUs = 0;
-volatile unsigned long lastBuzzerInterruptUs = 0;
-const unsigned long buttonDebounceUs = 200000; // 200 ms
-
-// Chu kỳ còi ngắt quãng: kêu 250 ms, nghỉ 750 ms.
-const unsigned long buzzerOnDuration = 250;
-const unsigned long buzzerOffDuration = 750;
-unsigned long lastBuzzerToggle = 0;
-bool buzzerOutputState = false;
+ControlOutputs readControlOutputs(uint32_t sampleVersion) {
+  const unsigned long startedAt = millis();
+  for (;;) {
+    portENTER_CRITICAL(&controlMux);
+    const ControlOutputs snapshot = controlOutputs;
+    const bool applied = appliedSensorVersion == sampleVersion;
+    portEXIT_CRITICAL(&controlMux);
+    if (applied) return snapshot;
+    if (millis() - startedAt >= 50) {
+      Serial.println("[WARN] Control task chua ap dung mau cam bien moi");
+      return snapshot;
+    }
+    vTaskDelay(1);
+  }
+}
 
 // Relay active high
 const int RELAY_ON = HIGH;
@@ -98,30 +100,6 @@ const unsigned long wifiAttemptTimeout = 20000;
 unsigned long lastWifiAttempt = 0;
 unsigned long wifiAttemptStartedAt = 0;
 bool wifiAttemptInProgress = false;
-
-void IRAM_ATTR onRelayButtonPressed() {
-  const unsigned long nowUs = micros();
-  if (nowUs - lastRelayInterruptUs >= buttonDebounceUs) {
-    relayButtonPressed = true;
-    lastRelayInterruptUs = nowUs;
-  }
-}
-
-void IRAM_ATTR onFanButtonPressed() {
-  const unsigned long nowUs = micros();
-  if (nowUs - lastFanInterruptUs >= buttonDebounceUs) {
-    fanButtonPressed = true;
-    lastFanInterruptUs = nowUs;
-  }
-}
-
-void IRAM_ATTR onBuzzerButtonPressed() {
-  const unsigned long nowUs = micros();
-  if (nowUs - lastBuzzerInterruptUs >= buttonDebounceUs) {
-    buzzerButtonPressed = true;
-    lastBuzzerInterruptUs = nowUs;
-  }
-}
 
 void connectWiFi() {
   const unsigned long now = millis();
@@ -157,52 +135,6 @@ void connectWiFi() {
   Serial.println("Connecting WiFi in background...");
 }
 
-void logButtonAction(const char* name, bool enabled) {
-  Serial.printf("[BUTTON] %s: %s\n", name, enabled ? "ON" : "OFF/AUTO");
-}
-
-void setBuzzer(bool enabled);
-
-// Các nút được xử lý nhanh ở local, không phụ thuộc backend/Wi-Fi.
-void handleButtons() {
-  bool relayPressed = false;
-  bool fanPressed = false;
-  bool buzzerPressed = false;
-
-  noInterrupts();
-  relayPressed = relayButtonPressed;
-  fanPressed = fanButtonPressed;
-  buzzerPressed = buzzerButtonPressed;
-  relayButtonPressed = false;
-  fanButtonPressed = false;
-  buzzerButtonPressed = false;
-  interrupts();
-
-  if (relayPressed) {
-    localRelayForced = !localRelayForced;
-    logButtonAction("Relay thong gio", localRelayForced);
-  }
-
-  if (fanPressed) {
-    localFanMaxForced = !localFanMaxForced;
-    logButtonAction("Quat MAX", localFanMaxForced);
-  }
-
-  if (buzzerPressed) {
-    localBuzzerEnabled = !localBuzzerEnabled;
-    if (localBuzzerEnabled) {
-      buzzerOutputState = true;
-      setBuzzer(true);
-      lastBuzzerToggle = millis();
-    } else {
-      buzzerOutputState = false;
-      setBuzzer(false);
-      lastBuzzerToggle = millis();
-    }
-    logButtonAction("Buzzer", localBuzzerEnabled);
-  }
-}
-
 // ======================================================
 // ĐIỀU KHIỂN QUẠT QUA L298
 // ======================================================
@@ -216,7 +148,6 @@ void setFanSpeed(uint8_t speed) {
   #else
     ledcWrite(FAN_PWM_CHANNEL, speed);
   #endif
-  currentFanSpeed = speed;
 }
 
 String fanLevelName(uint8_t speed) {
@@ -233,22 +164,38 @@ void setBuzzer(bool enabled) {
   digitalWrite(BUZZER_PIN, enabled ? HIGH : LOW);
 }
 
-void updateIntermittentBuzzer(bool enabled) {
-  if (!enabled) {
-    buzzerOutputState = false;
-    setBuzzer(false);
-    lastBuzzerToggle = millis();
-    return;
-  }
+void localControlTask(void*) {
+  LocalControls controls;
+  ControlOutputs previous;
+  for (;;) {
+    portENTER_CRITICAL(&controlMux);
+    ControlInputs input = controlInputs;
+    const uint32_t sampleVersion = sensorVersion;
+    const bool startRemote = remoteBuzzerCommand == REMOTE_REQUESTED;
+    if (startRemote) remoteBuzzerCommand = REMOTE_ACTIVE;
+    portEXIT_CRITICAL(&controlMux);
 
-  unsigned long duration = buzzerOutputState
-                             ? buzzerOnDuration
-                             : buzzerOffDuration;
+    const ControlOutputs output = controls.update(
+      millis(), digitalRead(BUTTON_RELAY_PIN) == LOW,
+      digitalRead(BUTTON_FAN_MAX_PIN) == LOW,
+      digitalRead(BUTTON_BUZZER_PIN) == LOW, input, startRemote);
 
-  if (millis() - lastBuzzerToggle >= duration) {
-    buzzerOutputState = !buzzerOutputState;
-    lastBuzzerToggle = millis();
-    setBuzzer(buzzerOutputState);
+    if (output.fanSpeed != previous.fanSpeed) setFanSpeed(output.fanSpeed);
+    if (output.ventilationOn != previous.ventilationOn) {
+      digitalWrite(RELAY_THONG_GIO, output.ventilationOn ? RELAY_ON : RELAY_OFF);
+    }
+    if (output.buzzerOn != previous.buzzerOn) setBuzzer(output.buzzerOn);
+
+    portENTER_CRITICAL(&controlMux);
+    controlOutputs = output;
+    appliedSensorVersion = sampleVersion;
+    if (remoteBuzzerCommand == REMOTE_ACTIVE && !output.remoteBuzzerActive) {
+      remoteBuzzerCommand = REMOTE_FINISHED;
+    }
+    portEXIT_CRITICAL(&controlMux);
+    previous = output;
+    // Chỉ task này ghi đầu ra sau setup; không gọi HTTP/Serial trong task.
+    ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(5) > 0 ? pdMS_TO_TICKS(5) : 1);
   }
 }
 
@@ -262,7 +209,7 @@ void sendSensorData(
   bool tempDanger,
   bool gasDanger,
   bool humidityDanger,
-  bool ventilationOn,
+  const ControlOutputs& output,
   const String& alertReason
 ) {
   if (WiFi.status() != WL_CONNECTED) return;
@@ -288,10 +235,15 @@ void sendSensorData(
   doc["alertReason"] = alertReason;
 
   // Các trường này giúp frontend cũ vẫn hiển thị được trạng thái cơ bản.
-  doc["fanSpeed"] = currentFanSpeed;
-  doc["fanLevel"] = fanLevelName(currentFanSpeed);
-  doc["fanTran"] = currentFanSpeed > 0 ? 1 : 0;
-  doc["thongGio"] = ventilationOn ? 1 : 0;
+  doc["fanSpeed"] = output.fanSpeed;
+  doc["fanLevel"] = fanLevelName(output.fanSpeed);
+  doc["fanTran"] = output.fanSpeed > 0 ? 1 : 0;
+  doc["thongGio"] = output.ventilationOn ? 1 : 0;
+  doc["localFanMaxForced"] = output.localFanMaxForced;
+  doc["localRelayForced"] = output.localRelayForced;
+  doc["localBuzzerEnabled"] = output.localBuzzerEnabled;
+  doc["buzzerEnabled"] = output.buzzerEnabled;
+  doc["remoteBuzzerActive"] = output.remoteBuzzerActive;
 
   String payload;
   serializeJson(doc, payload);
@@ -305,16 +257,17 @@ void sendSensorData(
 // ======================================================
 // ĐỌC LỆNH TỪ WEB: buzzer và relay thông gió thủ công
 // ======================================================
-void resetBuzzerOnServer() {
-  if (WiFi.status() != WL_CONNECTED) return;
+bool resetBuzzerOnServer() {
+  if (WiFi.status() != WL_CONNECTED) return false;
 
   HTTPClient http;
   http.begin(buzzerResetUrl);
   http.setConnectTimeout(1000);
   http.setTimeout(1500);
   http.addHeader("Content-Type", "application/json");
-  http.POST("{}");
+  const int responseCode = http.POST("{}");
   http.end();
+  return responseCode >= 200 && responseCode < 300;
 }
 
 void fetchSystemConfig() {
@@ -347,18 +300,6 @@ void fetchSystemConfig() {
   http.end();
 }
 
-void runRemoteBuzzerPattern() {
-  for (int cycle = 0; cycle < 5; cycle++) {
-    for (int beep = 0; beep < 4; beep++) {
-      setBuzzer(true);
-      delay(150);
-      setBuzzer(false);
-      delay(100);
-    }
-    delay(800);
-  }
-}
-
 void checkWebCommands() {
   if (WiFi.status() != WL_CONNECTED) return;
 
@@ -375,13 +316,18 @@ void checkWebCommands() {
 
     if (!error) {
       if (doc.containsKey("relayManualState")) {
-        webRelayForced = doc["relayManualState"].as<int>();
+        const bool forced = doc["relayManualState"].as<int>() == 1;
+        portENTER_CRITICAL(&controlMux);
+        controlInputs.webRelayForced = forced;
+        portEXIT_CRITICAL(&controlMux);
+        xTaskNotifyGive(controlTaskHandle);
       }
 
       if (doc["buzzerAlert"].as<int>() == 1) {
-        Serial.println("[WEB] Kich hoat buzzer tu xa");
-        runRemoteBuzzerPattern();
-        resetBuzzerOnServer();
+        portENTER_CRITICAL(&controlMux);
+        if (remoteBuzzerCommand == REMOTE_IDLE) remoteBuzzerCommand = REMOTE_REQUESTED;
+        portEXIT_CRITICAL(&controlMux);
+        xTaskNotifyGive(controlTaskHandle);
       }
     } else {
       Serial.println("[ERROR] Khong doc duoc JSON tu server");
@@ -405,9 +351,6 @@ void setup() {
   pinMode(BUTTON_RELAY_PIN, INPUT_PULLUP);
   pinMode(BUTTON_FAN_MAX_PIN, INPUT_PULLUP);
   pinMode(BUTTON_BUZZER_PIN, INPUT_PULLUP);
-  attachInterrupt(digitalPinToInterrupt(BUTTON_RELAY_PIN), onRelayButtonPressed, FALLING);
-  attachInterrupt(digitalPinToInterrupt(BUTTON_FAN_MAX_PIN), onFanButtonPressed, FALLING);
-  attachInterrupt(digitalPinToInterrupt(BUTTON_BUZZER_PIN), onBuzzerButtonPressed, FALLING);
   pinMode(FAN_IN1_PIN, OUTPUT);
   pinMode(FAN_IN2_PIN, OUTPUT);
 
@@ -429,6 +372,11 @@ void setup() {
   delay(300);
   setBuzzer(false);
 
+  if (xTaskCreate(localControlTask, "local-controls", 4096, nullptr, 2, &controlTaskHandle) != pdPASS) {
+    Serial.println("[ERROR] Khong tao duoc task dieu khien nut; dung khoi dong");
+    for (;;) delay(1000);
+  }
+
   connectWiFi();
 }
 
@@ -440,15 +388,17 @@ void loop() {
     connectWiFi();
   }
 
-  // Đọc nút trước các đoạn return theo chu kỳ cảm biến.
-  handleButtons();
-  // Cập nhật còi thường xuyên để tạo nhịp kêu ngắt quãng mượt.
-  // Cảnh báo cảm biến sẽ được OR thêm sau khi đọc cảm biến.
-  updateIntermittentBuzzer(localBuzzerEnabled || sensorDangerActive);
-
   if (millis() - lastCommandCheck >= commandInterval) {
     lastCommandCheck = millis();
     checkWebCommands();
+    portENTER_CRITICAL(&controlMux);
+    const bool remoteFinished = remoteBuzzerCommand == REMOTE_FINISHED;
+    portEXIT_CRITICAL(&controlMux);
+    if (remoteFinished && resetBuzzerOnServer()) {
+      portENTER_CRITICAL(&controlMux);
+      remoteBuzzerCommand = REMOTE_IDLE;
+      portEXIT_CRITICAL(&controlMux);
+    }
   }
 
   if (millis() - lastConfigFetch >= configInterval) {
@@ -475,31 +425,16 @@ void loop() {
   bool tempDanger = dhtValid && temperature > highTemperature;
   bool gasDanger = gas > gasThreshold;
   bool humidityDanger = dhtValid && humidity > humidityThreshold;
-  bool danger = tempDanger || gasDanger || humidityDanger;
-  sensorDangerActive = danger;
-
-  // Nút giữa đổi trạng thái ép quạt chạy mức MAX.
-  // Nhấn lần nữa để trở lại chế độ tự động.
-  if (localFanMaxForced) {
-    setFanSpeed(FAN_SPEED_FAST);
-  } else if (gasDanger || tempDanger || humidityDanger) {
-    setFanSpeed(FAN_SPEED_FAST);
-  } else if (temperature < lowTemperature) {
-    // Trời lạnh: tắt quạt. Có thể đổi thành FAN_SPEED_SLOW nếu cần.
-    setFanSpeed(FAN_SPEED_OFF);
-  } else {
-    setFanSpeed(FAN_SPEED_NORMAL);
-  }
-
-  // Relay bật khi bị ép từ Web hoặc khi khí gas vượt ngưỡng.
-  // webRelayForced = 1 có ưu tiên bật relay, không vô hiệu hóa logic an toàn tự động.
-  // Trạng thái từ nút vật lý và dashboard đều có thể yêu cầu bật relay.
-  // Khi gas nguy hiểm, relay vẫn luôn được bật để đảm bảo an toàn.
-  bool ventilationOn = localRelayForced || webRelayForced == 1 || gasDanger || humidityDanger;
-  digitalWrite(RELAY_THONG_GIO, ventilationOn ? RELAY_ON : RELAY_OFF);
-
-  // Còi kêu ngắt quãng khi được bật bằng nút hoặc khi có cảnh báo cảm biến.
-  updateIntermittentBuzzer(localBuzzerEnabled || danger);
+  portENTER_CRITICAL(&controlMux);
+  controlInputs.sensorReady = true;
+  controlInputs.tooCold = temperature < lowTemperature;
+  controlInputs.temperatureDanger = tempDanger;
+  controlInputs.gasDanger = gasDanger;
+  controlInputs.humidityDanger = humidityDanger;
+  const uint32_t sampleVersion = ++sensorVersion;
+  portEXIT_CRITICAL(&controlMux);
+  xTaskNotifyGive(controlTaskHandle);
+  const ControlOutputs output = readControlOutputs(sampleVersion);
 
   String alertReason = "An toan";
   if (tempDanger && gasDanger) {
@@ -517,10 +452,17 @@ void loop() {
   Serial.printf("Gas: %d | Gas limit: %d\n", gas, gasThreshold);
   Serial.printf("Comfort: %.1f C | Range: %.1f..%.1f C\n", comfortTemperature, lowTemperature, highTemperature);
   Serial.printf("Fan: %d/255 (%s) | Vent: %s | Buzzer: %s\n",
-                currentFanSpeed,
-                fanLevelName(currentFanSpeed).c_str(),
-                ventilationOn ? "ON" : "OFF",
-                danger ? "ON" : "OFF");
+                output.fanSpeed,
+                fanLevelName(output.fanSpeed).c_str(),
+                output.ventilationOn ? "ON" : "OFF",
+                output.buzzerEnabled ? "ON" : "OFF");
+  Serial.printf("[SOURCE] Local fan=%d relay=%d buzzer=%d | Web relay=%d buzzer=%d | Sensor temp=%d gas=%d humidity=%d\n",
+                output.localFanMaxForced, output.localRelayForced, output.localBuzzerEnabled,
+                output.webRelayForced, output.remoteBuzzerActive,
+                output.temperatureDanger, output.gasDanger, output.humidityDanger);
+  Serial.printf("[BUTTON COUNT] Relay=%lu Fan=%lu Buzzer=%lu\n",
+                (unsigned long)output.relayPresses, (unsigned long)output.fanPresses,
+                (unsigned long)output.buzzerPresses);
 
   sendSensorData(
     temperature,
@@ -529,7 +471,7 @@ void loop() {
     tempDanger,
     gasDanger,
     humidityDanger,
-    ventilationOn,
+    output,
     alertReason
   );
 }

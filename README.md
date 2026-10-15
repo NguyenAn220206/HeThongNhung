@@ -94,8 +94,8 @@ ESP32 gửi dữ liệu cảm biến khoảng mỗi 2 giây, đọc lệnh đi�
 
 ## 5. Logic điều khiển
 
-- Nhiệt độ dễ chịu mặc định: `28.0°C`.
-- Dải nhiệt độ bình thường: `comfortTemperature - 2` đến `comfortTemperature + 2`.
+- Nhiệt độ dễ chịu mặc định: `30.0°C`.
+- Dải nhiệt độ bình thường: `comfortTemperature - 3` đến `comfortTemperature + 3` (mặc định `27–33°C`).
 - Ngưỡng MQ-2 mặc định: `70` theo thang ADC của firmware hiện tại; cần hiệu chỉnh theo cảm biến thực tế.
 - Ngưỡng độ ẩm cao: `80%`.
 - Khi nhiệt độ thấp hơn dải bình thường: quạt tắt.
@@ -103,17 +103,33 @@ ESP32 gửi dữ liệu cảm biến khoảng mỗi 2 giây, đọc lệnh đi�
 - Khi nhiệt độ, gas hoặc độ ẩm vượt ngưỡng: quạt chạy nhanh và buzzer cảnh báo.
 - Relay thông gió bật khi gas/độ ẩm vượt ngưỡng hoặc relay bị ép bật từ nút vật lý/dashboard.
 - Nút quạt MAX có ưu tiên cao hơn logic tốc độ tự động.
-- Lệnh buzzer từ dashboard tạo một chuỗi buzzer từ xa, sau đó ESP32 báo backend reset cờ lệnh.
+- Lệnh buzzer từ dashboard tạo một chuỗi buzzer từ xa không dùng `delay()`, sau đó ESP32 báo backend reset cờ lệnh. Còi cảm biến/thủ công vẫn được tổng hợp độc lập với chuỗi còi web.
 
 ### Safety Mode – điều khiển dự phòng tại chỗ
 
 Safety Mode là nhóm nút chức năng vật lý trên ESP32, giúp người dùng vẫn xử lý được tình huống khẩn cấp khi tương tác online không hoạt động, chẳng hạn dashboard mất kết nối, backend dừng hoặc mạng LAN gặp sự cố. Các nút được xử lý trực tiếp trên ESP32 và không phụ thuộc vào frontend hay API:
 
-- **Nút relay (GPIO 23):** nhấn để bật/tắt yêu cầu relay thông gió tại chỗ. Khi có cảnh báo gas, logic an toàn tự động vẫn ưu tiên bật relay.
+- **Nút relay (GPIO 23):** nhấn để bật/tắt yêu cầu relay thông gió tại chỗ. Khi có cảnh báo gas/độ ẩm hoặc web ép bật, relay vẫn bật dù đã tắt yêu cầu tại chỗ.
 - **Nút quạt MAX (GPIO 22):** nhấn để ép quạt chạy tốc độ tối đa; nhấn lần nữa để quay lại chế độ tự động.
-- **Nút buzzer (GPIO 21):** nhấn để bật/tắt buzzer thủ công tại chỗ.
+- **Nút buzzer (GPIO 21):** nhấn để bật/tắt buzzer thủ công tại chỗ. Tắt yêu cầu tại chỗ không tắt cảnh báo cảm biến hoặc chuỗi còi từ web đang chạy.
 
-Firmware ghi nhận các lần nhấn bằng GPIO interrupt và không chờ Wi-Fi đồng bộ, nên các nút vẫn có thể sử dụng khi mạng yếu hoặc chập chờn. Đây là phương án dự phòng để duy trì khả năng can thiệp trực tiếp vào thiết bị khi dashboard hoặc backend không phản hồi.
+Firmware dùng một task FreeRTOS riêng để đọc ba nút, chống dội độc lập và cập nhật đầu ra, kể cả khi `loop()` đang chờ HTTP. Mỗi mức nhấn/thả cần ổn định ít nhất 40 ms; nhấn giữ chỉ ghi nhận một lần và cần thả ổn định trước lần nhấn tiếp theo. Sau khởi tạo, chỉ task này ghi đầu ra quạt, relay và còi. Bấm nút quạt chỉ thay đổi yêu cầu quạt MAX; gas/độ ẩm vẫn có thể tự động bật đồng thời quạt, relay và còi.
+
+Để kiểm tra hiện tượng các nút ảnh hưởng lẫn nhau, mở Serial Monitor ở **115200 baud**, đưa relay web về AUTO và thử từng nút khi các cảm biến không cảnh báo:
+
+- `[BUTTON COUNT] Relay=... Fan=... Buzzer=...`: nhấn quạt chỉ tăng `Fan`. Nếu bộ đếm khác cùng tăng, kiểm tra dây nút và nhiễu điện. Mỗi nút nối GPIO tương ứng xuống GND khi nhấn, dùng `INPUT_PULLUP`.
+- `[SOURCE] Local ... | Web ... | Sensor ...`: cho biết các yêu cầu đang kích hoạt đầu ra. Nếu bộ đếm nút khác không tăng nhưng `Sensor gas=1` hoặc `humidity=1`, relay/còi đang bật do cảm biến. Đối chiếu giá trị đo và ngưỡng trước khi hiệu chỉnh.
+- Nếu bất thường xuất hiện ngay khi động cơ khởi động, kiểm tra nguồn cấp ESP32/động cơ, mass chung và dây tín hiệu trên mạch thật. Log khởi động lặp lại có thể cho thấy ESP32 đã reset.
+
+Phần logic thuần C++ có thể kiểm thử trên máy mà không cần ESP32 (cần `g++`):
+
+```powershell
+$testBinary = Join-Path $env:TEMP 'hethongnhung-local-controls-test.exe'
+g++ -std=c++11 -Wall -Wextra -Werror tests/local_controls_test.cpp -o $testBinary
+if ($LASTEXITCODE -eq 0) { & $testBinary }
+```
+
+Kiểm thử bao gồm nút độc lập, chống dội, nhấn giữ/nhấn lại, 128 tổ hợp ưu tiên, nhấn nút trong chuỗi còi web và tràn bộ đếm thời gian. Các kiểm thử này không thay thế việc biên dịch bằng ESP32 Arduino core và thử nguồn điện/GPIO trên phần cứng. Khi nạp firmware, giữ `LocalControls.h` cùng thư mục với `esp32_code.ino`.
 
 ## 6. Yêu cầu môi trường
 
@@ -189,7 +205,7 @@ Ví dụ:
 
 ```json
 {
-  "comfortTemperature": 28,
+  "comfortTemperature": 30,
   "gasThreshold": 70
 }
 ```
