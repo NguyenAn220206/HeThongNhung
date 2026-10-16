@@ -26,7 +26,99 @@ struct Rig {
   }
 };
 
+void testTemperatureReminder() {
+  LocalControls controls;
+  ControlInputs hot;
+  hot.sensorReady = true;
+  hot.temperatureDanger = true;
+  const uint32_t started = 12345;
+  unsigned bursts = 0, beeps = 0;
+  bool wasEnabled = false, wasOn = false;
+  // Three complete bursts: immediately, at 5 min and at 10 min.
+  for (uint32_t elapsed = 0; elapsed <= 603005; elapsed += 5) {
+    const auto out = controls.update(started + elapsed, false, false, false, hot);
+    const uint32_t phase = elapsed % 300000;
+    const bool expectedBurst = phase < 3000;
+    const bool expectedOn = expectedBurst && phase % 1000 < 250;
+    assert(out.buzzerEnabled == expectedBurst);
+    assert(out.buzzerOn == expectedOn);
+    assert(out.fanSpeed == 255 && !out.ventilationOn);
+    assert(out.temperatureDanger);
+    if (out.buzzerEnabled && !wasEnabled) ++bursts;
+    if (out.buzzerOn && !wasOn) ++beeps;
+    wasEnabled = out.buzzerEnabled;
+    wasOn = out.buzzerOn;
+  }
+  assert(bursts == 3 && beeps == 9);
+
+  // Recovery interrupts a beep immediately; a fresh crossing sounds again.
+  Rig recovery;
+  recovery.input.sensorReady = true;
+  recovery.input.temperatureDanger = true;
+  recovery.tick();
+  assert(recovery.output.buzzerOn);
+  recovery.input.temperatureDanger = false;
+  recovery.tick();
+  assert(!recovery.output.buzzerOn && !recovery.output.buzzerEnabled);
+  assert(recovery.output.fanSpeed == 170);
+  recovery.input.temperatureDanger = true;
+  recovery.tick();
+  assert(recovery.output.buzzerOn);
+  recovery.wait(3000);
+  assert(!recovery.output.buzzerEnabled);
+  recovery.input.temperatureDanger = false;
+  recovery.tick();
+  recovery.wait(300000);
+  assert(!recovery.output.buzzerEnabled);
+  recovery.input.temperatureDanger = true;
+  recovery.tick();
+  assert(recovery.output.buzzerOn);
+
+  // Run through uint32_t timer wrap with the same burst and reminder timings.
+  LocalControls wrap;
+  const uint32_t nearWrap = UINT32_MAX - 1000;
+  for (uint32_t elapsed = 0; elapsed <= 303005; elapsed += 5) {
+    const auto out = wrap.update(uint32_t(nearWrap + elapsed), false, false, false, hot);
+    const uint32_t phase = elapsed % 300000;
+    assert(out.buzzerEnabled == (phase < 3000));
+    assert(out.buzzerOn == (phase < 3000 && phase % 1000 < 250));
+  }
+}
+
+void testTemperatureWithOtherBuzzerSources() {
+  // Compare the old alarm sources with/without heat through its silent period
+  // and its next reminder. Heat must never suppress their existing waveforms.
+  for (unsigned source = 0; source < 4; ++source) {
+    LocalControls baseline, withHeat;
+    ControlInputs normal, hot;
+    for (uint32_t elapsed = 0; elapsed <= 303005; elapsed += 5) {
+      normal.gasDanger = source == 0 && elapsed >= 1000 && elapsed < 301000;
+      normal.humidityDanger = source == 1 && elapsed >= 1000 && elapsed < 301000;
+      hot = normal;
+      hot.temperatureDanger = true;
+      // Toggle manual buzzer on/off while heat is otherwise silent.
+      const bool manualDown = source == 2 &&
+          ((elapsed >= 5000 && elapsed < 5100) || (elapsed >= 15000 && elapsed < 15100));
+      const bool remoteStart = source == 3 && (elapsed == 5000 || elapsed == 299000);
+      const auto base = baseline.update(elapsed, false, false, manualDown, normal, remoteStart);
+      const auto combined = withHeat.update(elapsed, false, false, manualDown, hot, remoteStart);
+      const uint32_t phase = elapsed % 300000;
+      const bool heatBurst = phase < 3000;
+      const bool heatOn = heatBurst && phase % 1000 < 250;
+      assert(combined.buzzerEnabled == (base.buzzerEnabled || heatBurst));
+      assert(combined.buzzerOn == (base.buzzerOn || heatOn));
+      assert(combined.ventilationOn == base.ventilationOn);
+      assert(combined.localBuzzerEnabled == base.localBuzzerEnabled);
+      assert(combined.remoteBuzzerActive == base.remoteBuzzerActive);
+      assert(combined.buzzerPresses == base.buzzerPresses);
+      assert(combined.fanSpeed == 255);
+    }
+  }
+}
+
 int main() {
+  testTemperatureReminder();
+  testTemperatureWithOtherBuzzerSources();
   // Fan-only actions must never enable relay/buzzer in a normal environment.
   Rig fan;
   fan.input.sensorReady = true;
@@ -161,5 +253,6 @@ int main() {
   assert(!wrap.output.remoteBuzzerActive);
 
   std::cout << "PASS: button isolation, debounce, holds, repeat presses, 128 priority combinations, "
-               "remote timing/concurrent buttons, timer wrap\n";
+               "remote timing/concurrent buttons, timer wrap, three-beep temperature bursts, "
+               "five-minute reminders/recovery, independent gas/humidity/manual/web buzzer\n";
 }

@@ -86,10 +86,23 @@ class LocalControls {
     state_.ventilationOn = state_.localRelayForced || input.webRelayForced
                            || input.gasDanger || input.humidityDanger;
 
-    const bool alarm = state_.localBuzzerEnabled || danger;
+    // Gas, humidity and manual buzzer keep their existing repeating pattern.
+    const bool alarm = state_.localBuzzerEnabled || input.gasDanger || input.humidityDanger;
     if (alarm && !alarmWasEnabled_) alarmStartedAt_ = now;
     alarmWasEnabled_ = alarm;
     const bool alarmOn = alarm && uint32_t(now - alarmStartedAt_) % 1000 < 250;
+
+    // Temperature alone: three 250 ms beeps over 3 s, repeated every 5 min
+    // from the start of the previous burst while the temperature stays high.
+    // A return to normal cancels the burst and rearms the next threshold crossing.
+    if (input.temperatureDanger && (!temperatureWasDangerous_
+        || uint32_t(now - temperatureBurstStartedAt_) >= 300000)) {
+      temperatureBurstStartedAt_ = now;
+    }
+    temperatureWasDangerous_ = input.temperatureDanger;
+    const uint32_t temperatureElapsed = uint32_t(now - temperatureBurstStartedAt_);
+    const bool temperatureBurst = input.temperatureDanger && temperatureElapsed < 3000;
+    const bool temperatureOn = temperatureBurst && temperatureElapsed % 1000 < 250;
 
     if (startRemoteBuzzer && !state_.remoteBuzzerActive) {
       state_.remoteBuzzerActive = true;
@@ -103,8 +116,8 @@ class LocalControls {
     const uint32_t remotePhase = remoteElapsed % 1800;
     const bool remoteOn = state_.remoteBuzzerActive && remotePhase < 1000
                           && remotePhase % 250 < 150;
-    state_.buzzerEnabled = alarm || state_.remoteBuzzerActive;
-    state_.buzzerOn = alarmOn || remoteOn;
+    state_.buzzerEnabled = alarm || temperatureBurst || state_.remoteBuzzerActive;
+    state_.buzzerOn = alarmOn || temperatureOn || remoteOn;
     return state_;
   }
 
@@ -115,5 +128,7 @@ class LocalControls {
   ControlOutputs state_;
   bool alarmWasEnabled_ = false;
   uint32_t alarmStartedAt_ = 0;
+  bool temperatureWasDangerous_ = false;
+  uint32_t temperatureBurstStartedAt_ = 0;
   uint32_t remoteStartedAt_ = 0;
 };
